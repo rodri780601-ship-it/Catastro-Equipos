@@ -391,6 +391,7 @@
   function setTitle(title, sub) {
     $('#page-title').textContent = title;
     $('#page-sub').textContent = sub || '';
+    $('#demo-badge').classList.toggle('hidden', !D().demo);
     document.title = title + ' · Catastro de Equipos CONAF';
   }
 

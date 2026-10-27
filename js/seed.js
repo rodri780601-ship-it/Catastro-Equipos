@@ -1,6 +1,9 @@
 /* =========================================================
    seed.js — Datos ficticios de demostración
    Se generan la primera vez que se abre el sistema.
+   Todo es inventado y se marca como tal: RUT bajo 1.000.000,
+   correos con dominio reservado .example (RFC 2606) y
+   proveedores con nombre "Demo".
    ========================================================= */
 'use strict';
 
@@ -44,18 +47,18 @@ const Seed = {
 
     /* ---- Usuarios del sistema ---- */
     const users = [
-      { id: 'u_admin', username: 'admin', name: 'Administrador General', email: 'admin@conaf.cl', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') },
-      { id: 'u_maule', username: 'usuario.maule', name: 'Encargado TI Maule', email: 'ti.maule@conaf.cl', role: 'usuario', region: 'VII', active: true, passHash: hashPass('usuario.maule', 'usuario123') },
-      { id: 'u_rm', username: 'usuario.rm', name: 'Encargada TI Metropolitana', email: 'ti.rm@conaf.cl', role: 'usuario', region: 'RM', active: true, passHash: hashPass('usuario.rm', 'usuario123') }
+      { id: 'u_admin', username: 'admin', name: 'Administrador General', email: 'admin@conaf.example', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') },
+      { id: 'u_maule', username: 'usuario.maule', name: 'Encargado TI Maule', email: 'ti.maule@conaf.example', role: 'usuario', region: 'VII', active: true, passHash: hashPass('usuario.maule', 'usuario123') },
+      { id: 'u_rm', username: 'usuario.rm', name: 'Encargada TI Metropolitana', email: 'ti.rm@conaf.example', role: 'usuario', region: 'RM', active: true, passHash: hashPass('usuario.rm', 'usuario123') }
     ];
 
     /* ---- Contratos de arriendo (fechas relativas a hoy) ---- */
     const contratos = [
-      { id: 'c1', codigo: 'ARR-2024-014', proveedor: 'Tecnología Integral S.A.', rutProveedor: '76.123.456-0', descripcion: 'Arriendo de notebooks y computadores de escritorio a nivel nacional', fechaInicio: addDays(today, -580), fechaTermino: addDays(today, 520), contacto: 'mesadeayuda@tecintegral.example' },
-      { id: 'c2', codigo: 'ARR-2023-007', proveedor: 'Soluciones de Impresión Ltda.', rutProveedor: '77.654.321-K', descripcion: 'Servicio de impresión y multifuncionales con insumos incluidos', fechaInicio: addDays(today, -1050), fechaTermino: addDays(today, 50), contacto: 'soporte@solimpresion.example' },
-      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'RentaTec SpA', rutProveedor: '76.987.001-3', descripcion: 'Arriendo de tablets y equipos móviles para brigadas', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@rentatec.example' }
+      { id: 'c1', codigo: 'ARR-2024-014', proveedor: 'Proveedor Demo Computación S.A.', rutProveedor: '111111', descripcion: 'Arriendo de notebooks y computadores de escritorio a nivel nacional', fechaInicio: addDays(today, -580), fechaTermino: addDays(today, 520), contacto: 'mesadeayuda@computacion-demo.example' },
+      { id: 'c2', codigo: 'ARR-2023-007', proveedor: 'Proveedor Demo Impresión Ltda.', rutProveedor: '222222', descripcion: 'Servicio de impresión y multifuncionales con insumos incluidos', fechaInicio: addDays(today, -1050), fechaTermino: addDays(today, 50), contacto: 'soporte@impresion-demo.example' },
+      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'Proveedor Demo Móviles SpA', rutProveedor: '333333', descripcion: 'Arriendo de tablets y equipos móviles para brigadas', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@moviles-demo.example' }
     ];
-    contratos.forEach(c => { c.rutProveedor = rutFormat(c.rutProveedor.slice(0, -1) + rutDV(rutClean(c.rutProveedor).slice(0, -1))); });
+    contratos.forEach(c => { c.rutProveedor = rutFormat(c.rutProveedor + rutDV(c.rutProveedor)); });
 
     /* ---- Funcionarios ---- */
     const personas = [];
@@ -64,7 +67,8 @@ const Seed = {
       const n = Math.round(4 + (peso[r.code] || 1) * 4);
       for (let i = 0; i < n; i++) {
         const nom = pick(nombres), ap1 = pick(apellidos), ap2 = pick(apellidos);
-        let num; do { num = String(int(8000000, 21000000)); } while (usedRut.has(num));
+        // RUT bajo 1.000.000: fuera del rango de RUT de personas en uso, se reconoce como ficticio
+        let num; do { num = String(int(100000, 999999)); } while (usedRut.has(num));
         usedRut.add(num);
         personas.push({
           id: 'p' + (personas.length + 1),
@@ -73,7 +77,7 @@ const Seed = {
           cargo: i === 0 && r.code !== 'OC' ? 'Director/a Regional' : pick(cargos),
           unidad: i === 0 && r.code !== 'OC' ? 'Dirección Regional' : pick(UNIDADES),
           region: r.code,
-          email: `${strip(nom)}.${strip(ap1)}@conaf.cl`,
+          email: `${strip(nom)}.${strip(ap1)}@conaf.example`,
           activo: rnd() > 0.05
         });
       }
@@ -131,7 +135,7 @@ const Seed = {
           eq.fechaBaja = vencido ? dateBetween(c.fechaTermino, today) : dateBetween(addDays(fechaAlta, 900), addDays(today, -5));
           if (eq.fechaBaja > today) eq.fechaBaja = addDays(today, -3);
           eq.motivoBaja = vencido ? 'Devolución a proveedor (fin de arriendo)' : pick(['Obsolescencia técnica', 'Obsolescencia técnica', 'Daño irreparable', 'Robo o hurto']);
-          eq.detalleBaja = vencido ? 'Retirado por el proveedor según acta de devolución.' : 'Res. Exenta N° ' + int(100, 999) + '/' + eq.fechaBaja.slice(0, 4);
+          eq.detalleBaja = vencido ? 'Retirado por el proveedor según acta de devolución.' : 'Res. Exenta N° DEMO-' + int(100, 999) + '/' + eq.fechaBaja.slice(0, 4);
           mv(eq, stamp(eq.fechaBaja), 'Baja', `${eq.motivoBaja}. ${eq.detalleBaja}`);
         } else if (roll < 0.8 && gente.length && !['Servidor', 'Equipo de red'].includes(tipo)) {
           const p = pick(gente.filter(g => g.activo).length ? gente.filter(g => g.activo) : gente);
@@ -163,6 +167,6 @@ const Seed = {
     movimientos.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
     movimientos.forEach((m, i) => { m.id = 'm' + (i + 1); });
 
-    return { version: 1, creado: new Date().toISOString(), nextInventario: inv, users, personas, contratos, equipos, movimientos };
+    return { version: 1, demo: true, creado: new Date().toISOString(), nextInventario: inv, users, personas, contratos, equipos, movimientos };
   }
 };
