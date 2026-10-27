@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catastro de Equipos · CONAF</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- ============ LOGIN ============ -->
+  <section id="login-view" class="login-view hidden">
+    <div class="login-art">
+      <div class="login-art-inner">
+        <div class="brand-mark big">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 5 12h4l-4 6h6v4h2v-4h6l-4-6h4z"/></svg>
+        </div>
+        <h1>Catastro de Equipos Informáticos</h1>
+        <p>Inventario de equipos propios y arrendados por región: altas, bajas, asignaciones a funcionarios y trazabilidad completa de cada movimiento.</p>
+        <ul class="login-points">
+          <li>Un registro único por N° de inventario y N° de serie</li>
+          <li>Control de contratos de arriendo y vencimientos</li>
+          <li>Actas de entrega listas para firmar</li>
+        </ul>
+      </div>
+    </div>
+    <div class="login-panel">
+      <form id="login-form" class="login-card" autocomplete="on">
+        <div class="login-head">
+          <span class="eyebrow">Corporación Nacional Forestal</span>
+          <h2>Iniciar sesión</h2>
+        </div>
+        <label class="field">
+          <span>Usuario</span>
+          <input name="username" autocomplete="username" required autofocus>
+        </label>
+        <label class="field">
+          <span>Contraseña</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <p id="login-error" class="form-error hidden">Usuario o contraseña incorrectos.</p>
+        <button class="btn primary block" type="submit">Ingresar</button>
+        <div class="demo-box">
+          <strong>Cuentas de demostración</strong>
+          <button type="button" class="demo-acc" data-u="admin" data-p="admin123"><span>admin</span><em>Administrador · todas las regiones</em></button>
+          <button type="button" class="demo-acc" data-u="usuario.maule" data-p="usuario123"><span>usuario.maule</span><em>Usuario · Región del Maule</em></button>
+          <button type="button" class="demo-acc" data-u="usuario.rm" data-p="usuario123"><span>usuario.rm</span><em>Usuario · Región Metropolitana</em></button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <div id="app-view" class="app hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 5 12h4l-4 6h6v4h2v-4h6l-4-6h4z"/></svg>
+        </div>
+        <div>
+          <strong>Catastro de Equipos</strong>
+          <span>CONAF · TI</span>
+        </div>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Menú"></button>
+        <div class="topbar-title">
+          <h1 id="page-title">Panel</h1>
+          <span id="page-sub" class="muted"></span>
+        </div>
+        <div class="user-menu">
+          <button class="user-btn" id="user-btn" aria-haspopup="true">
+            <span class="avatar" id="user-avatar"></span>
+            <span class="user-info"><strong id="user-name"></strong><small id="user-role"></small></span>
+          </button>
+          <div class="dropdown hidden" id="user-dropdown">
+            <button data-act="password">Cambiar contraseña</button>
+            <button data-act="logout">Cerrar sesión</button>
+          </div>
+        </div>
+      </header>
+      <main id="content" class="content"></main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <!-- SheetJS para importar/exportar Excel (si no carga, el sistema usa CSV) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/seed.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
