@@ -268,18 +268,19 @@
         body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:36px;font-size:13px;line-height:1.45}
         h1{font-size:17px;text-align:center;margin:0 0 4px;letter-spacing:.03em}
         .sub{text-align:center;color:#444;margin-bottom:22px}
-        .head{display:flex;justify-content:space-between;border-bottom:2px solid #1e5b3c;padding-bottom:10px;margin-bottom:18px}
-        .head strong{color:#1e5b3c;font-size:14px}
+        .head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:2px solid #004d40;padding-bottom:10px;margin-bottom:18px}
+        .head img{display:block;width:190px;height:auto;margin-bottom:6px}
+        .head strong{color:#004d40;font-size:14px}
         table{width:100%;border-collapse:collapse;margin:10px 0 18px}
         th,td{border:1px solid #999;padding:6px 8px;text-align:left;vertical-align:top}
-        th{background:#eef3ef;font-size:12px}
-        .data td:first-child{width:160px;background:#f6f7f6;font-weight:bold}
+        th{background:#e9f6ec;font-size:12px}
+        .data td:first-child{width:160px;background:#f7f9f7;font-weight:bold}
         .sign{display:flex;gap:60px;margin-top:70px}
         .sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px}
         ol{padding-left:18px}
         @media print{body{margin:14mm}}
       </style></head><body>
-      <div class="head"><div><strong>CORPORACIÓN NACIONAL FORESTAL</strong><br>Región ${esc(regionName(p.region))}</div><div style="text-align:right">Folio: <b>${esc(folio)}</b><br>Fecha: ${esc(fmtDate(todayISO()))}</div></div>
+      <div class="head"><div><img src="${new URL('img/logo-gobierno-conaf.svg', location.href).href}" alt="Gobierno de Chile · CONAF"><strong>CORPORACIÓN NACIONAL FORESTAL</strong><br>Región ${esc(regionName(p.region))}</div><div style="text-align:right">Folio: <b>${esc(folio)}</b><br>Fecha: ${esc(fmtDate(todayISO()))}</div></div>
       <h1>ACTA DE ENTREGA DE EQUIPAMIENTO INFORMÁTICO</h1>
       <div class="sub">Asignación de equipos para el desempeño de funciones institucionales</div>
       <table class="data">
@@ -443,7 +444,7 @@
     vig.forEach(e => tipos[e.tipo] = (tipos[e.tipo] || 0) + 1);
     const tList = Object.entries(tipos).sort((a, b) => b[1] - a[1]);
     const tMax = Math.max(1, ...tList.map(t => t[1]));
-    const tiposHTML = tList.map(([t, n]) => `<div class="bar-row"><span class="lbl">${esc(t)}</span><span class="bar-track"><i style="width:${n / tMax * 100}%;background:#5b8a6e"></i></span><span class="val">${n}</span></div>`).join('');
+    const tiposHTML = tList.map(([t, n]) => `<div class="bar-row"><span class="lbl">${esc(t)}</span><span class="bar-track"><i style="width:${n / tMax * 100}%;background:var(--heading)"></i></span><span class="val">${n}</span></div>`).join('');
 
     // Alertas
     const alerts = [];

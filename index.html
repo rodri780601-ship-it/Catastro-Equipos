@@ -6,7 +6,7 @@
   <title>Catastro de Equipos · CONAF</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -15,9 +15,6 @@
   <section id="login-view" class="login-view hidden">
     <div class="login-art">
       <div class="login-art-inner">
-        <div class="brand-mark big">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 5 12h4l-4 6h6v4h2v-4h6l-4-6h4z"/></svg>
-        </div>
         <h1>Catastro de Equipos Informáticos</h1>
         <p>Inventario de equipos propios y arrendados por región: altas, bajas, asignaciones a funcionarios y trazabilidad completa de cada movimiento.</p>
         <ul class="login-points">
@@ -30,6 +27,7 @@
     <div class="login-panel">
       <form id="login-form" class="login-card" autocomplete="on">
         <div class="login-head">
+          <img class="login-logo" src="img/logo-gobierno-conaf.svg" alt="Gobierno de Chile · Ministerio de Agricultura · CONAF">
           <span class="eyebrow">Corporación Nacional Forestal</span>
           <h2>Iniciar sesión</h2>
         </div>
@@ -57,14 +55,13 @@
   <div id="app-view" class="app hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 5 12h4l-4 6h6v4h2v-4h6l-4-6h4z"/></svg>
-        </div>
-        <div>
-          <strong>Catastro de Equipos</strong>
-          <span>CONAF · TI</span>
-        </div>
+        <img src="img/logo-gobierno-conaf.svg" alt="Gobierno de Chile · Ministerio de Agricultura · CONAF">
       </div>
+      <div class="brand-name">
+        <strong>Catastro de Equipos</strong>
+        <span>Tecnologías de la Información</span>
+      </div>
+      <div class="gob-stripe" aria-hidden="true"></div>
       <nav id="nav" class="nav"></nav>
       <div class="sidebar-foot" id="sidebar-foot"></div>
     </aside>
