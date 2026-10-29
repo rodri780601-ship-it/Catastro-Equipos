@@ -114,6 +114,11 @@ input:disabled,select:disabled{background:var(--surface-2);color:var(--muted)}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--inst)}
 .demo-notice{border:1px solid #efd9a6;line-height:1.4}
 .demo-notice strong{text-transform:uppercase;letter-spacing:.04em;font-size:12.5px}
+.manual-link{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line-strong);border-radius:var(--radius);color:var(--primary);text-decoration:none;transition:background .15s,border-color .15s}
+.manual-link:hover{background:var(--primary-50);border-color:var(--primary-100)}
+.manual-link svg.i{width:22px;height:22px}
+.manual-link strong{display:block;font-size:14px}
+.manual-link small{display:block;font-size:12px;color:var(--muted)}
 .gob-stripe{display:flex;height:4px}
 .gob-stripe::before{content:"";flex:4;background:var(--gob-blue)}
 .gob-stripe::after{content:"";flex:6;background:var(--gob-red)}
