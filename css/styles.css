@@ -112,6 +112,8 @@ input:disabled,select:disabled{background:var(--surface-2);color:var(--muted)}
 .login-logo{display:block;width:250px;max-width:100%;height:auto;margin-bottom:18px}
 .login-head h2{font-size:24px;margin-top:4px;color:var(--heading);text-transform:uppercase;letter-spacing:.02em}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--inst)}
+.demo-notice{border:1px solid #efd9a6;line-height:1.4}
+.demo-notice strong{text-transform:uppercase;letter-spacing:.04em;font-size:12.5px}
 .gob-stripe{display:flex;height:4px}
 .gob-stripe::before{content:"";flex:4;background:var(--gob-blue)}
 .gob-stripe::after{content:"";flex:6;background:var(--gob-red)}
