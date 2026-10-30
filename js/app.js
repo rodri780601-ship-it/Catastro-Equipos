@@ -46,7 +46,8 @@
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>',
     refresh: '<path d="M20 12a8 8 0 0 1-14.3 5"/><path d="M4 12a8 8 0 0 1 14.3-5"/><path d="M18 3v4h-4M6 21v-4h4"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    power: '<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>'
+    power: '<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
+    inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/>'
   };
 
   const D = () => Store.data;
@@ -366,6 +367,7 @@
     panel: { title: 'Panel', icon: 'dashboard', render: renderPanel },
     equipos: { title: 'Equipos', icon: 'laptop', render: renderEquipos },
     equipo: { title: 'Ficha de equipo', render: renderEquipo, hidden: true, parent: 'equipos' },
+    solicitudes: { title: 'Solicitudes pendientes', icon: 'inbox', render: renderSolicitudes },
     funcionarios: { title: 'Funcionarios', icon: 'users', render: renderFuncionarios },
     contratos: { title: 'Contratos de arriendo', icon: 'file', render: renderContratos },
     movimientos: { title: 'Historial de movimientos', icon: 'history', render: renderMovimientos },
@@ -374,16 +376,16 @@
   };
 
   function renderNav(active) {
-    const pend = D().equipos.filter(e => e.solicitudBaja && inScope(e)).length;
+    const pend = solicitudesPendientes().length;
     const item = (key, label) => {
       const r = ROUTES[key];
-      const badge = key === 'equipos' && pend && isAdmin() ? `<span class="count" title="Solicitudes de baja pendientes">${pend}</span>` : '';
+      const badge = key === 'solicitudes' && pend ? `<span class="count" title="Solicitudes por resolver">${pend}</span>` : '';
       return `<a href="#/${key}" class="${active === key || r.parent === active ? 'active' : ''}">${I(r.icon)}<span>${label || r.title}</span>${badge}</a>`;
     };
     const activeKey = ROUTES[active] && ROUTES[active].parent ? ROUTES[active].parent : active;
     $('#nav').innerHTML = `
       <div class="nav-label">Inventario</div>
-      ${item('panel')}${item('equipos')}${item('funcionarios')}${item('contratos', 'Contratos')}${item('movimientos', 'Movimientos')}
+      ${item('panel')}${item('equipos')}${item('solicitudes', 'Solicitudes')}${item('funcionarios')}${item('contratos', 'Contratos')}${item('movimientos', 'Movimientos')}
       ${isAdmin() ? `<div class="nav-label">Administración</div>${item('usuarios', 'Usuarios')}${item('respaldo', 'Importar / respaldo')}` : ''}`;
     $$('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + activeKey));
   }
@@ -450,7 +452,7 @@
     // Alertas
     const alerts = [];
     const pend = all.filter(e => e.solicitudBaja);
-    if (pend.length) alerts.push({ cls: 'danger', icon: 'trash', title: `${plural(pend.length, 'solicitud', 'solicitudes')} de baja pendiente${pend.length === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/equipos?estado=solicitud' });
+    if (pend.length) alerts.push({ cls: 'danger', icon: 'trash', title: `${plural(pend.length, 'solicitud', 'solicitudes')} de baja pendiente${pend.length === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/solicitudes' });
     D().contratos.forEach(c => {
       const st = contratoStatus(c);
       const n = vig.filter(e => e.contratoId === c.id).length;
@@ -953,10 +955,62 @@
       asignar: () => asignarModal(e), devolver: () => devolverModal(e), acta: () => printActa(e.personaId, [e.id]),
       reparar: () => reparacionModal(e, false), retorno: () => reparacionModal(e, true), editar: () => equipoForm(e),
       baja: () => bajaModal(e), aprobar: () => bajaModal(e), rechazar: () => rechazarBajaModal(e),
-      'cancelar-sol': () => confirmDialog({ title: 'Retirar solicitud de baja', message: '¿Desea retirar la solicitud de baja de este equipo?', confirmLabel: 'Retirar solicitud', onConfirm: () => { e.solicitudBaja = null; log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } }),
+      'cancelar-sol': () => retirarSolicitud(e),
       reactivar: () => confirmDialog({ title: 'Revertir baja', message: `El equipo <b>${esc(e.inventario)}</b> volverá a estar vigente con estado <b>Disponible</b>.`, confirmLabel: 'Revertir baja', onConfirm: () => { Object.assign(e, { estado: 'Disponible', fechaBaja: '', motivoBaja: '', detalleBaja: '' }); log(e, 'Reactivación', 'Se revierte la baja del equipo.'); save(); toast('Baja revertida.'); route(); } })
     };
     $$('[data-act]', el).forEach(b => b.addEventListener('click', () => handlers[b.dataset.act] && handlers[b.dataset.act]()));
+  }
+
+  function retirarSolicitud(e) {
+    confirmDialog({ title: 'Retirar solicitud de baja', message: '¿Desea retirar la solicitud de baja de este equipo?', confirmLabel: 'Retirar solicitud', onConfirm: () => { e.solicitudBaja = null; log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } });
+  }
+
+  /* =====================================================
+     SOLICITUDES PENDIENTES
+     ===================================================== */
+  // Hoy solo hay solicitudes de baja; otros tipos se suman aquí con su propio "tipo".
+  function solicitudesPendientes() {
+    return D().equipos.filter(e => e.solicitudBaja && inScope(e))
+      .map(e => Object.assign({ tipo: 'Baja', equipo: e }, e.solicitudBaja))
+      .sort((a, b) => a.fecha < b.fecha ? -1 : 1);
+  }
+
+  function renderSolicitudes(el) {
+    setTitle('Solicitudes pendientes', isAdmin() ? 'Todas las regiones' : 'Región ' + regionName(me.region));
+    const list = solicitudesPendientes();
+    const intro = `<p class="muted" style="margin:0 0 14px">${isAdmin()
+      ? 'Solicitudes de los usuarios regionales que esperan su aprobación o rechazo. Las más antiguas aparecen primero.'
+      : 'Solicitudes de su región que esperan la revisión de un administrador. Mientras tanto, puede retirarlas.'}</p>`;
+    if (!list.length) {
+      el.innerHTML = `${intro}<div class="table-wrap"><div class="empty"><strong>No hay solicitudes pendientes</strong>Todas las solicitudes han sido resueltas.</div></div>`;
+      return;
+    }
+    el.innerHTML = `${intro}
+      <div class="result-bar"><strong>${plural(list.length, 'solicitud pendiente', 'solicitudes pendientes')}</strong></div>
+      <div class="table-wrap"><table class="req-table">
+        <thead><tr><th>Tipo</th><th>Equipo</th>${isAdmin() ? '<th class="hide-sm">Región</th>' : ''}<th>Motivo</th><th class="hide-sm">Solicitado</th><th></th></tr></thead>
+        <tbody>${list.map(s => {
+          const e = s.equipo;
+          const dias = daysBetween(s.fecha.slice(0, 10), todayISO());
+          return `<tr class="clickable" data-id="${e.id}">
+            <td><span class="badge b-danger">${esc(s.tipo)}</span></td>
+            <td class="nowrap"><strong class="mono">${esc(e.inventario)}</strong><span class="sub">${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)}</span></td>
+            ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
+            <td>${esc(s.motivo)}${s.detalle ? `<span class="sub" title="${esc(s.detalle)}">${esc(s.detalle)}</span>` : ''}</td>
+            <td class="hide-sm nowrap">${fmtDateTime(s.fecha)} · ${dias <= 0 ? 'hoy' : 'hace ' + plural(dias, 'día')}<span class="sub">${esc(s.usuario)}</span></td>
+            <td class="actions">${isAdmin()
+              ? `<button class="btn sm danger" data-aprobar="${e.id}">Aprobar</button> <button class="btn sm" data-rechazar="${e.id}">Rechazar</button>`
+              : `<button class="btn sm" data-retirar="${e.id}">Retirar</button>`}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`;
+
+    $$('tr[data-id]', el).forEach(tr => tr.addEventListener('click', ev => {
+      if (ev.target.closest('button')) return;
+      location.hash = '#/equipo/' + tr.dataset.id;
+    }));
+    $$('[data-aprobar]', el).forEach(b => b.addEventListener('click', () => bajaModal(equipo(b.dataset.aprobar))));
+    $$('[data-rechazar]', el).forEach(b => b.addEventListener('click', () => rechazarBajaModal(equipo(b.dataset.rechazar))));
+    $$('[data-retirar]', el).forEach(b => b.addEventListener('click', () => retirarSolicitud(equipo(b.dataset.retirar))));
   }
 
   /* =====================================================
