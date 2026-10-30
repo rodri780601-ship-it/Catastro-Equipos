@@ -47,7 +47,8 @@
     refresh: '<path d="M20 12a8 8 0 0 1-14.3 5"/><path d="M4 12a8 8 0 0 1 14.3-5"/><path d="M18 3v4h-4M6 21v-4h4"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     power: '<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
-    inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/>'
+    inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'
   };
 
   const D = () => Store.data;
@@ -321,6 +322,8 @@
     $('#user-role').textContent = isAdmin() ? 'Administrador · Nacional' : 'Usuario · ' + regionName(me.region);
     $('#user-avatar').textContent = initials(me.name);
     $('#sidebar-foot').innerHTML = isAdmin() ? 'Alcance: todas las regiones' : 'Alcance: Región ' + esc(regionName(me.region));
+    const nuevas = respuestasNuevas().length;
+    if (nuevas) setTimeout(() => toast(`Tiene ${plural(nuevas, 'respuesta nueva', 'respuestas nuevas')} a sus solicitudes. Revíselas en Solicitudes.`, 'warn'), 400);
     if (!location.hash || location.hash === '#') location.hash = '#/panel';
     else route();
   }
@@ -376,10 +379,11 @@
   };
 
   function renderNav(active) {
-    const pend = solicitudesPendientes().length;
+    // Administrador: solicitudes por resolver · usuario regional: respuestas nuevas a sus solicitudes
+    const pend = isAdmin() ? solicitudesPendientes().length : respuestasNuevas().length;
     const item = (key, label) => {
       const r = ROUTES[key];
-      const badge = key === 'solicitudes' && pend ? `<span class="count" title="Solicitudes por resolver">${pend}</span>` : '';
+      const badge = key === 'solicitudes' && pend ? `<span class="count" title="${isAdmin() ? 'Solicitudes por resolver' : 'Respuestas nuevas'}">${pend}</span>` : '';
       return `<a href="#/${key}" class="${active === key || r.parent === active ? 'active' : ''}">${I(r.icon)}<span>${label || r.title}</span>${badge}</a>`;
     };
     const activeKey = ROUTES[active] && ROUTES[active].parent ? ROUTES[active].parent : active;
@@ -394,6 +398,7 @@
     $('#page-title').textContent = title;
     $('#page-sub').textContent = sub || '';
     $('#demo-badge').classList.toggle('hidden', !D().demo);
+    actualizarAvisos();
     document.title = title + ' · Catastro de Equipos CONAF';
   }
 
@@ -451,6 +456,7 @@
 
     // Alertas
     const alerts = [];
+    respuestasNuevas().forEach(s => alerts.push({ cls: s.estado === 'Aprobada' ? 'info' : 'danger', icon: 'inbox', title: `Su solicitud de baja de ${s.inventario} fue ${s.estado.toLowerCase()}`, text: `Respondida por ${s.resolucion.usuario} el ${fmtDateTime(s.resolucion.fecha)}. Vea el detalle en Solicitudes.`, href: '#/solicitudes' }));
     const pend = all.filter(e => e.solicitudBaja);
     if (pend.length) alerts.push({ cls: 'danger', icon: 'trash', title: `${plural(pend.length, 'solicitud', 'solicitudes')} de baja pendiente${pend.length === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/solicitudes' });
     D().contratos.forEach(c => {
@@ -836,13 +842,14 @@
         if (direct) {
           if (!fd.fecha) return fieldError(form, 'fecha', 'Ingrese la fecha de baja.');
           if (e.personaId) { const p = persona(e.personaId); log(e, 'Devolución', `Devuelto por ${p ? p.nombre : 'responsable'} por baja del equipo.`); }
+          if (sol) resolverSolicitud(e, 'Aprobada', `Baja registrada con fecha ${fmtDate(fd.fecha)}.${fd.detalle ? ' ' + fd.detalle : ''}`);
           Object.assign(e, { estado: 'De baja', personaId: '', fechaAsignacion: '', fechaBaja: fd.fecha, motivoBaja: fd.motivo, detalleBaja: fd.detalle, solicitudBaja: null });
           log(e, 'Baja', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}${sol ? ` (solicitada por ${sol.usuario})` : ''}`);
           toast(`${e.inventario} dado de baja.`);
         } else {
-          e.solicitudBaja = { motivo: fd.motivo, detalle: fd.detalle, fecha: nowStamp(), usuario: me.name, usuarioId: me.id };
+          registrarSolicitud(e, { motivo: fd.motivo, detalle: fd.detalle, fecha: nowStamp(), usuario: me.name, usuarioId: me.id });
           log(e, 'Solicitud de baja', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}`);
-          toast('Solicitud de baja enviada al administrador.');
+          toast('Solicitud enviada. Puede seguirla en Solicitudes.');
         }
         save(); route();
       }
@@ -855,7 +862,7 @@
       body: `${eqSummary(e)}<label class="field"><span>Motivo del rechazo <span class="req">*</span></span><textarea name="obs" rows="3"></textarea></label>`,
       onSubmit: (fd, form) => {
         if (!fd.obs) return fieldError(form, 'obs', 'Indique el motivo del rechazo.');
-        e.solicitudBaja = null;
+        resolverSolicitud(e, 'Rechazada', fd.obs);
         log(e, 'Solicitud rechazada', fd.obs);
         save(); toast('Solicitud rechazada.'); route();
       }
@@ -962,25 +969,70 @@
   }
 
   function retirarSolicitud(e) {
-    confirmDialog({ title: 'Retirar solicitud de baja', message: '¿Desea retirar la solicitud de baja de este equipo?', confirmLabel: 'Retirar solicitud', onConfirm: () => { e.solicitudBaja = null; log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } });
+    confirmDialog({ title: 'Retirar solicitud de baja', message: '¿Desea retirar la solicitud de baja de este equipo?', confirmLabel: 'Retirar solicitud', onConfirm: () => { resolverSolicitud(e, 'Retirada', 'Retirada por el solicitante.'); log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } });
   }
 
   /* =====================================================
-     SOLICITUDES PENDIENTES
+     SOLICITUDES
      ===================================================== */
+  // Cada solicitud queda registrada con su estado y respuesta, para el seguimiento del solicitante.
   // Hoy solo hay solicitudes de baja; otros tipos se suman aquí con su propio "tipo".
+  function SOL() {
+    const d = D();
+    if (!Array.isArray(d.solicitudes)) {
+      // Datos o respaldos anteriores a este registro: se crea a partir de las bajas pendientes
+      d.solicitudes = [];
+      d.equipos.filter(e => e.solicitudBaja).forEach(e => registrarSolicitud(e, e.solicitudBaja));
+      Store.save();
+    }
+    return d.solicitudes;
+  }
+
+  function registrarSolicitud(e, datos) {
+    const s = { id: Store.uid('s'), tipo: 'Baja', equipoId: e.id, inventario: e.inventario, region: e.region, motivo: datos.motivo, detalle: datos.detalle || '', fecha: datos.fecha, usuario: datos.usuario, usuarioId: datos.usuarioId, estado: 'Pendiente', resolucion: null, visto: true };
+    SOL().push(s);
+    e.solicitudBaja = Object.assign({}, datos, { id: s.id });
+    return s;
+  }
+
+  // Cierra la solicitud pendiente del equipo. Si la responde otra persona, el solicitante recibe un aviso.
+  function resolverSolicitud(e, estado, comentario) {
+    const s = e.solicitudBaja && SOL().find(x => x.id === e.solicitudBaja.id);
+    e.solicitudBaja = null;
+    if (!s) return;
+    s.estado = estado;
+    s.resolucion = { fecha: nowStamp(), usuario: me.name, usuarioId: me.id, comentario: comentario || '' };
+    s.visto = s.usuarioId === me.id;
+  }
+
+  const respuestasNuevas = () => me ? SOL().filter(s => s.usuarioId === me.id && s.estado !== 'Pendiente' && !s.visto) : [];
+
+  function actualizarAvisos() {
+    const n = respuestasNuevas().length;
+    $('#notif-btn').classList.toggle('hidden', !n);
+    $('#notif-count').textContent = n;
+    $('#notif-btn').title = n ? `${plural(n, 'respuesta nueva', 'respuestas nuevas')} a sus solicitudes` : '';
+  }
+
   function solicitudesPendientes() {
-    return D().equipos.filter(e => e.solicitudBaja && inScope(e))
-      .map(e => Object.assign({ tipo: 'Baja', equipo: e }, e.solicitudBaja))
+    return SOL().filter(s => s.estado === 'Pendiente' && inScope(s))
+      .map(s => Object.assign({ equipo: equipo(s.equipoId) }, s)).filter(s => s.equipo)
       .sort((a, b) => a.fecha < b.fecha ? -1 : 1);
   }
 
+  function solEstadoBadge(s) {
+    const map = { 'Pendiente': ['b-warn', 'En revisión'], 'Aprobada': ['b-ok', 'Aprobada'], 'Rechazada': ['b-danger', 'Rechazada'], 'Retirada': ['b-neutral', 'Retirada'] };
+    const [cls, label] = map[s.estado] || ['b-neutral', s.estado];
+    return `<span class="badge ${cls}"><span class="dot"></span>${label}</span>`;
+  }
+
+  const haceDias = f => { const d = daysBetween(f.slice(0, 10), todayISO()); return d <= 0 ? 'hoy' : 'hace ' + plural(d, 'día'); };
+
   function renderSolicitudes(el) {
-    setTitle('Solicitudes pendientes', isAdmin() ? 'Todas las regiones' : 'Región ' + regionName(me.region));
+    if (!isAdmin()) return renderMisSolicitudes(el);
+    setTitle('Solicitudes pendientes', 'Todas las regiones');
     const list = solicitudesPendientes();
-    const intro = `<p class="muted" style="margin:0 0 14px">${isAdmin()
-      ? 'Solicitudes de los usuarios regionales que esperan su aprobación o rechazo. Las más antiguas aparecen primero.'
-      : 'Solicitudes de su región que esperan la revisión de un administrador. Mientras tanto, puede retirarlas.'}</p>`;
+    const intro = `<p class="muted" style="margin:0 0 14px">Solicitudes de los usuarios regionales que esperan su aprobación o rechazo. Las más antiguas aparecen primero. Al responder, el solicitante recibe un aviso.</p>`;
     if (!list.length) {
       el.innerHTML = `${intro}<div class="table-wrap"><div class="empty"><strong>No hay solicitudes pendientes</strong>Todas las solicitudes han sido resueltas.</div></div>`;
       return;
@@ -997,10 +1049,8 @@
             <td class="nowrap"><strong class="mono">${esc(e.inventario)}</strong><span class="sub">${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)}</span></td>
             ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
             <td>${esc(s.motivo)}${s.detalle ? `<span class="sub" title="${esc(s.detalle)}">${esc(s.detalle)}</span>` : ''}</td>
-            <td class="hide-sm nowrap">${fmtDateTime(s.fecha)} · ${dias <= 0 ? 'hoy' : 'hace ' + plural(dias, 'día')}<span class="sub">${esc(s.usuario)}</span></td>
-            <td class="actions">${isAdmin()
-              ? `<button class="btn sm danger" data-aprobar="${e.id}">Aprobar</button> <button class="btn sm" data-rechazar="${e.id}">Rechazar</button>`
-              : `<button class="btn sm" data-retirar="${e.id}">Retirar</button>`}</td>
+            <td class="hide-sm nowrap">${fmtDateTime(s.fecha)} · ${haceDias(s.fecha)}<span class="sub">${esc(s.usuario)}</span></td>
+            <td class="actions"><button class="btn sm danger" data-aprobar="${e.id}">Aprobar</button> <button class="btn sm" data-rechazar="${e.id}">Rechazar</button></td>
           </tr>`;
         }).join('')}</tbody></table></div>`;
 
@@ -1010,7 +1060,49 @@
     }));
     $$('[data-aprobar]', el).forEach(b => b.addEventListener('click', () => bajaModal(equipo(b.dataset.aprobar))));
     $$('[data-rechazar]', el).forEach(b => b.addEventListener('click', () => rechazarBajaModal(equipo(b.dataset.rechazar))));
+  }
+
+  /* ---------- Usuario regional: seguimiento de sus solicitudes ---------- */
+  function renderMisSolicitudes(el) {
+    setTitle('Mis solicitudes', 'Región ' + regionName(me.region));
+    const mias = SOL().filter(s => s.usuarioId === me.id).sort((a, b) => a.fecha < b.fecha ? 1 : -1);
+    const nuevas = new Set(respuestasNuevas().map(s => s.id));
+    const enCurso = mias.filter(s => s.estado === 'Pendiente');
+    const resueltas = mias.filter(s => s.estado !== 'Pendiente');
+
+    const card = s => {
+      const e = equipo(s.equipoId), r = s.resolucion, pend = s.estado === 'Pendiente';
+      const fin = { 'Aprobada': 'done', 'Rechazada': 'rejected', 'Retirada': 'withdrawn' }[s.estado] || '';
+      const revision = pend ? `Esperando al administrador · ${haceDias(s.fecha)}` : s.estado === 'Retirada' ? 'Retirada antes de la revisión' : 'Revisada por ' + esc(r.usuario);
+      const nota = r && r.comentario && s.estado !== 'Retirada'
+        ? `<div class="callout ${s.estado === 'Aprobada' ? 'info' : 'danger'}">${I(s.estado === 'Aprobada' ? 'check' : 'alert')}<div><b>Respuesta del administrador:</b> ${esc(r.comentario)}</div></div>` : '';
+      return `<article class="panel req-card${nuevas.has(s.id) ? ' is-new' : ''}">
+        <div class="req-head">
+          <div><span class="badge b-danger">${esc(s.tipo)}</span> <a class="mono" href="#/equipo/${esc(s.equipoId)}"><strong>${esc(s.inventario)}</strong></a>${e ? ` <span class="muted">${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)}</span>` : ''}</div>
+          <div>${nuevas.has(s.id) ? '<span class="badge b-info">Respuesta nueva</span> ' : ''}${solEstadoBadge(s)}</div>
+        </div>
+        <p class="req-motivo"><b>${esc(s.motivo)}</b>${s.detalle ? ' · ' + esc(s.detalle) : ''}</p>
+        <ol class="track" aria-label="Seguimiento de la solicitud">
+          <li class="done"><b>Enviada</b><span>${fmtDateTime(s.fecha)}</span></li>
+          <li class="${pend ? 'current' : fin === 'withdrawn' ? 'withdrawn' : 'done'}"><b>En revisión</b><span>${revision}</span></li>
+          <li class="${fin}"><b>${pend ? 'Respuesta' : esc(s.estado)}</b><span>${pend ? 'Pendiente' : fmtDateTime(r.fecha)}</span></li>
+        </ol>
+        ${nota}
+        ${pend ? `<div><button class="btn sm" data-retirar="${esc(s.equipoId)}">${I('undo')}Retirar solicitud</button></div>` : ''}
+      </article>`;
+    };
+    const seccion = (titulo, list) => list.length ? `<h3 class="req-section">${titulo} <span class="muted">(${list.length})</span></h3><div class="req-list">${list.map(card).join('')}</div>` : '';
+
+    el.innerHTML = `<p class="muted" style="margin:0 0 14px">Siga aquí el estado de las solicitudes que ha enviado. Cuando el administrador responda, verá un aviso en la campana de la barra superior y en el Panel.</p>
+      ${mias.length ? seccion('En curso', enCurso) + seccion('Respondidas', resueltas)
+        : '<div class="table-wrap"><div class="empty"><strong>Aún no ha enviado solicitudes</strong>Puede solicitar la baja de un equipo desde su ficha.</div></div>'}`;
     $$('[data-retirar]', el).forEach(b => b.addEventListener('click', () => retirarSolicitud(equipo(b.dataset.retirar))));
+
+    // Al abrir la pantalla, las respuestas nuevas quedan leídas (se destacan solo esta vez)
+    if (nuevas.size) {
+      mias.forEach(s => { if (nuevas.has(s.id)) s.visto = true; });
+      save(); renderNav('solicitudes'); actualizarAvisos();
+    }
   }
 
   /* =====================================================

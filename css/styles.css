@@ -234,6 +234,34 @@ td.person{min-width:190px}
 td.person strong,td.person .name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;font-weight:500}
 td.actions{text-align:right;white-space:nowrap}
 .req-table td .sub{max-width:180px}
+
+/* ---------- Seguimiento de solicitudes ---------- */
+.req-section{font-size:15px;color:var(--inst);margin:20px 0 10px}
+.req-section:first-of-type{margin-top:4px}
+.req-list{display:grid;gap:12px}
+.req-card{padding:16px 18px;display:grid;gap:12px}
+.req-card.is-new{border-color:var(--info);box-shadow:0 0 0 3px var(--info-bg)}
+.req-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.req-head a{color:var(--text);text-decoration:none}
+.req-head a:hover{color:var(--primary)}
+.req-motivo{margin:0;font-size:14px;color:var(--text-2)}
+.track{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.track li{position:relative;padding:22px 12px 0 0;font-size:13px;min-width:0}
+.track li::before{content:"";position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line)}
+.track li:last-child::before{display:none}
+.track li::after{content:"";position:absolute;top:0;left:0;width:13px;height:13px;border-radius:50%;background:var(--surface);border:3px solid var(--line-strong);box-sizing:border-box}
+.track li.done::before{background:var(--primary)}
+.track li.done::after{background:var(--primary);border-color:var(--primary)}
+.track li.current::after{background:var(--warn-bg);border-color:var(--warn)}
+.track li.rejected::after{background:var(--danger);border-color:var(--danger)}
+.track li.withdrawn::after{background:var(--neutral);border-color:var(--neutral)}
+.track b{display:block;font-size:13.5px}
+.track li.rejected b{color:var(--danger)}
+.track span{color:var(--muted)}
+.notif{position:relative;display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--text-2);flex:none}
+.notif:hover{background:var(--primary-50);color:var(--primary)}
+.notif svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.notif span{position:absolute;top:1px;right:0;min-width:18px;height:18px;padding:0 5px;border-radius:20px;background:var(--gob-red);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;border:2px solid var(--surface)}
 .empty{padding:40px 20px;text-align:center;color:var(--muted)}
 .empty strong{display:block;color:var(--text-2);font-size:16px;margin-bottom:4px}
 .pager{display:flex;align-items:center;gap:4px;justify-content:flex-end;padding:12px 2px;flex-wrap:wrap}

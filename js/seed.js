@@ -155,18 +155,44 @@ const Seed = {
       }
     });
 
-    // Algunas solicitudes de baja pendientes (creadas por usuarios regionales)
-    const candidatos = equipos.filter(e => e.estado !== 'De baja' && e.propiedad === 'Propio' && ['VII', 'RM'].includes(e.region) && e.fechaAlta < '2021-01-01');
-    candidatos.slice(0, 3).forEach((e, i) => {
-      const f = addDays(today, -(i * 3 + 1));
-      const u = e.region === 'VII' ? users[1] : users[2];
-      e.solicitudBaja = { motivo: i === 1 ? 'Daño irreparable' : 'Obsolescencia técnica', detalle: i === 1 ? 'Pantalla y placa madre dañadas; reparación no conveniente según informe técnico.' : 'Equipo no soporta sistema operativo vigente.', fecha: stamp(f), usuario: u.name, usuarioId: u.id };
-      mv(e, e.solicitudBaja.fecha, 'Solicitud de baja', `${e.solicitudBaja.motivo}. ${e.solicitudBaja.detalle}`, u.name);
-    });
+    /* ---- Solicitudes de baja de los usuarios regionales: pendientes y algunas ya respondidas ---- */
+    const solicitudes = [];
+    // Equipos propios vigentes de la región, los más antiguos primero
+    const candidatos = r => equipos.filter(e => e.estado !== 'De baja' && e.propiedad === 'Propio' && e.region === r && !['Servidor', 'Equipo de red'].includes(e.tipo))
+      .sort((a, b) => a.fechaAlta < b.fechaAlta ? -1 : 1);
+    const rm = candidatos('RM'), vii = candidatos('VII');
+    const solicitar = (e, u, motivo, detalle, f) => {
+      const s = { id: 's' + (solicitudes.length + 1), tipo: 'Baja', equipoId: e.id, inventario: e.inventario, region: e.region, motivo, detalle, fecha: stamp(f), usuario: u.name, usuarioId: u.id, estado: 'Pendiente', resolucion: null, visto: true };
+      solicitudes.push(s);
+      e.solicitudBaja = { id: s.id, motivo, detalle, fecha: s.fecha, usuario: u.name, usuarioId: u.id };
+      mv(e, s.fecha, 'Solicitud de baja', `${motivo}. ${detalle}`, u.name);
+      e.actualizado = s.fecha;
+      return s;
+    };
+    // La respuesta queda sin leer (visto: false) para que el solicitante reciba el aviso
+    const responder = (s, e, estado, comentario, f) => {
+      const admin = users[0];
+      s.estado = estado; s.visto = false;
+      s.resolucion = { fecha: stamp(f), usuario: admin.name, usuarioId: admin.id, comentario };
+      e.solicitudBaja = null;
+      if (estado === 'Rechazada') mv(e, s.resolucion.fecha, 'Solicitud rechazada', comentario, admin.name);
+      else {
+        const p = personas.find(x => x.id === e.personaId);
+        if (p) mv(e, s.resolucion.fecha, 'Devolución', `Devuelto por ${p.nombre} por baja del equipo.`, admin.name);
+        Object.assign(e, { estado: 'De baja', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
+        mv(e, s.resolucion.fecha, 'Baja', `${s.motivo}. ${comentario} (solicitada por ${s.usuario})`, admin.name);
+      }
+      e.actualizado = s.resolucion.fecha;
+    };
+    if (rm[0]) solicitar(rm[0], users[2], 'Obsolescencia técnica', 'Equipo no soporta sistema operativo vigente.', addDays(today, -1));
+    if (rm[1]) solicitar(rm[1], users[2], 'Daño irreparable', 'Pantalla y placa madre dañadas; reparación no conveniente según informe técnico.', addDays(today, -4));
+    if (vii[0]) solicitar(vii[0], users[1], 'Obsolescencia técnica', 'Equipo no soporta sistema operativo vigente.', addDays(today, -2));
+    if (vii[1]) responder(solicitar(vii[1], users[1], 'Obsolescencia técnica', 'Equipo lento; no soporta las aplicaciones actuales.', addDays(today, -12)), vii[1], 'Rechazada', 'El equipo aún cumple los requisitos mínimos. Se recomienda ampliar la memoria y reasignarlo.', addDays(today, -10));
+    if (vii[2]) responder(solicitar(vii[2], users[1], 'Daño irreparable', 'Placa madre dañada según informe técnico IT-DEMO-044.', addDays(today, -9)), vii[2], 'Aprobada', `Res. Exenta N° DEMO-512/${today.slice(0, 4)}.`, addDays(today, -6));
 
     movimientos.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
     movimientos.forEach((m, i) => { m.id = 'm' + (i + 1); });
 
-    return { version: 1, demo: true, creado: new Date().toISOString(), nextInventario: inv, users, personas, contratos, equipos, movimientos };
+    return { version: 1, demo: true, creado: new Date().toISOString(), nextInventario: inv, users, personas, contratos, equipos, movimientos, solicitudes };
   }
 };
