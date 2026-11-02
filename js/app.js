@@ -724,8 +724,9 @@
         fd.inventario = fd.inventario.toUpperCase();
         if (!fd.inventario) return fieldError(form, 'inventario', 'Ingrese el número de inventario.');
         if (D().equipos.some(x => x !== eq && norm(x.inventario) === norm(fd.inventario))) return fieldError(form, 'inventario', 'Ya existe un equipo con este número de inventario.');
-        if (!fd.serie) return fieldError(form, 'serie', 'Ingrese el número de serie.');
-        const dupSerie = D().equipos.find(x => x !== eq && norm(x.serie) === norm(fd.serie));
+        // Obligatoria al ingresar a mano; un equipo importado sin serie se puede editar dejándola vacía
+        if (!fd.serie && (isNew || eq.serie)) return fieldError(form, 'serie', 'Ingrese el número de serie.');
+        const dupSerie = fd.serie && D().equipos.find(x => x !== eq && norm(x.serie) === norm(fd.serie));
         if (dupSerie) return fieldError(form, 'serie', `Esta serie ya está registrada en ${dupSerie.inventario}.`);
         if (!fd.marca) return fieldError(form, 'marca', 'Ingrese la marca.');
         if (fd.propiedad === 'Arrendado' && !fd.contratoId) return fieldError(form, 'contratoId', 'Seleccione el contrato de arriendo.');
@@ -1583,31 +1584,41 @@
     const headers = Object.keys(rawRows[0]);
     const map = {}; headers.forEach(h => { const k = mapHeader(h); if (k && !Object.values(map).includes(k)) map[h] = k; });
     res.columnas = Object.entries(map).map(([h, k]) => `${h} → ${k}`);
-    const fields = new Set(Object.values(map));
-    if (!fields.has('inventario') || !fields.has('serie')) {
-      res.errores.push('No se encontraron las columnas obligatorias "N° inventario" y "N° serie".');
+    if (!Object.keys(map).length) {
+      res.errores.push('No se reconoció ninguna columna. Revise los encabezados de la planilla (sección 9.2 del manual) o use la plantilla.');
       return res;
     }
+    // El N° de inventario y el N° de serie son opcionales: sin inventario se asigna el siguiente
+    // correlativo libre (sin chocar con los del sistema ni con los que trae la planilla)
+    const usados = new Set(D().equipos.map(e => norm(e.inventario)));
+    const colInv = Object.keys(map).find(h => map[h] === 'inventario');
+    if (colInv) rawRows.forEach(raw => { const v = String(raw[colInv] ?? '').trim(); if (v) usados.add(norm(v)); });
+    let correlativo = D().nextInventario || 10001;
+    const siguienteInventario = () => { while (usados.has(norm('CONAF-' + correlativo))) correlativo++; const v = 'CONAF-' + correlativo; usados.add(norm(v)); return v; };
+    const asignados = [];
+    let sinSerie = 0;
     const seenInv = new Set(), seenSerie = new Set();
     const tmpPersonas = [];
     rawRows.forEach((raw, i) => {
       const line = i + 2;
       const r = {}; Object.entries(map).forEach(([h, k]) => { r[k] = String(raw[h] ?? '').trim(); });
-      if (!r.inventario && !r.serie) return;
-      if (!r.inventario) return res.errores.push(`Fila ${line}: falta N° de inventario.`);
-      if (!r.serie) return res.errores.push(`Fila ${line}: falta N° de serie (${r.inventario}).`);
-      const inv = r.inventario.toUpperCase(), serie = r.serie.toUpperCase();
-      if (seenInv.has(norm(inv))) return res.errores.push(`Fila ${line}: inventario ${inv} repetido en la planilla.`);
-      if (seenSerie.has(norm(serie))) return res.errores.push(`Fila ${line}: serie ${serie} repetida en la planilla.`);
-      seenInv.add(norm(inv)); seenSerie.add(norm(serie));
+      if (!Object.values(r).some(Boolean)) return;
+      const serie = (r.serie || '').toUpperCase();
+      if (r.inventario && seenInv.has(norm(r.inventario))) return res.errores.push(`Fila ${line}: inventario ${r.inventario.toUpperCase()} repetido en la planilla.`);
+      if (serie && seenSerie.has(norm(serie))) return res.errores.push(`Fila ${line}: serie ${serie} repetida en la planilla.`);
       const region = matchRegion(r.region) || opts.regionDefault;
       if (!region) return res.errores.push(`Fila ${line}: región "${r.region || '(vacía)'}" no reconocida.`);
       const tipo = matchTipo(r.tipo);
       if (!tipo) return res.errores.push(`Fila ${line}: tipo "${r.tipo || '(vacío)'}" no reconocido; debe ser ${TIPOS.join(', ')}.`);
-      const existing = D().equipos.find(e => norm(e.inventario) === norm(inv));
-      const serieOwner = D().equipos.find(e => norm(e.serie) === norm(serie));
+      const existing = r.inventario ? D().equipos.find(e => norm(e.inventario) === norm(r.inventario)) : null;
+      const serieOwner = serie ? D().equipos.find(e => norm(e.serie) === norm(serie)) : null;
       if (serieOwner && serieOwner !== existing) return res.errores.push(`Fila ${line}: la serie ${serie} ya pertenece a ${serieOwner.inventario}.`);
-      if (existing && !opts.actualizar) return res.errores.push(`Fila ${line}: ${inv} ya existe (active "Actualizar existentes" para sobrescribir).`);
+      if (existing && !opts.actualizar) return res.errores.push(`Fila ${line}: ${existing.inventario} ya existe (active "Actualizar existentes" para sobrescribir).`);
+      // Fila válida: se reservan su inventario (o uno nuevo) y su serie
+      const inv = r.inventario ? r.inventario.toUpperCase() : siguienteInventario();
+      if (!r.inventario) asignados.push(inv);
+      if (!serie) sinSerie++;
+      seenInv.add(norm(inv)); if (serie) seenSerie.add(norm(serie));
       let propiedad = /arr|leasing|renta/.test(norm(r.propiedad)) ? 'Arrendado' : (r.contrato ? 'Arrendado' : 'Propio');
       let contratoId = '';
       if (propiedad === 'Arrendado') {
@@ -1642,6 +1653,9 @@
       };
       (existing ? res.actualizar : res.nuevos).push(item);
     });
+    // Avisos generales (no impiden importar), al inicio de la lista
+    if (sinSerie) res.errores.unshift(`${plural(sinSerie, 'equipo')} sin N° de serie: se importa${sinSerie === 1 ? '' : 'n'} con la serie vacía; puede completarse después en su ficha.`);
+    if (asignados.length) res.errores.unshift(`${plural(asignados.length, 'equipo')} sin N° de inventario: se asigna${asignados.length === 1 ? ` ${asignados[0]}` : `n los correlativos ${asignados[0]} a ${asignados.at(-1)}`}.`);
     res.personas = tmpPersonas;
     res.personasNuevas = tmpPersonas.length;
     return res;
@@ -1653,7 +1667,7 @@
       title: 'Importar equipos desde Excel', size: 'lg', submitLabel: 'Importar',
       body: `
         <label class="dropzone" id="dz"><input type="file" id="imp-file" accept=".xlsx,.xls,.csv" hidden>
-          <strong>Seleccione o arrastre la planilla aquí</strong>Formatos .xlsx, .xls o .csv · Columnas mínimas: N° inventario y N° serie</label>
+          <strong>Seleccione o arrastre la planilla aquí</strong>Formatos .xlsx, .xls o .csv · Si falta el N° de inventario se asigna un correlativo; el N° de serie es opcional</label>
         <div class="form-grid">
           <label class="field"><span>Región por defecto</span><select name="regionDefault">${regionOptions('', 'Ninguna (usar columna Región)')}</select><small>Se usa cuando la fila no indica región.</small></label>
           <div class="field" style="justify-content:center"><label class="check"><input type="checkbox" name="actualizar" value="1"> Actualizar equipos existentes (mismo N° inventario)</label></div>
@@ -1693,6 +1707,9 @@
           if (e.estado === 'Baja' && !e.fechaBaja) { e.fechaBaja = todayISO(); e.motivoBaja = 'Otro'; }
           log(e, 'Modificación', `Actualizado desde ${fileName}.`);
         });
+        // El próximo correlativo sugerido queda después del mayor CONAF-##### registrado
+        const maxInv = Math.max(0, ...D().equipos.map(e => /^CONAF-(\d+)$/.exec(e.inventario)).filter(Boolean).map(m => Number(m[1])));
+        if (maxInv >= (D().nextInventario || 0)) D().nextInventario = maxInv + 1;
         save();
         toast(`Importación lista: ${res.nuevos.length} nuevos, ${res.actualizar.length} actualizados.`);
         setTimeout(route, 0);
