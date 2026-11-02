@@ -28,10 +28,10 @@ const REGIONES = [
   { code: 'XII',  name: 'Magallanes' }
 ];
 
-const TIPOS = [
-  'Notebook', 'Computador de escritorio', 'Monitor', 'Impresora / Multifuncional',
-  'Tablet', 'Teléfono móvil', 'Proyector', 'Servidor', 'Equipo de red', 'Otro'
-];
+// AIO = computador "todo en uno" (pantalla y CPU en un solo equipo)
+const TIPOS = ['Monitor', 'Notebook', 'Impresora', 'Desktop', 'AIO'];
+// Nombres de tipos de versiones anteriores que tienen equivalente directo
+const TIPOS_ANTERIORES = { 'Computador de escritorio': 'Desktop', 'Impresora / Multifuncional': 'Impresora' };
 
 const UNIDADES = [
   'Dirección Regional',
@@ -138,10 +138,13 @@ const Store = {
       this.save();
     } else if (this.migrate()) this.save();
   },
-  // Datos de versiones anteriores: "De baja" pasa a "Baja" y "En reparación" deja de ser un estado
+  // Datos de versiones anteriores: "De baja" pasa a "Baja", "En reparación" deja de ser un estado
+  // y los tipos con equivalente se renombran. En datos reales los demás tipos se conservan tal cual;
+  // en los datos de demostración, los equipos de tipos fuera del catálogo se eliminan.
   migrate() {
     let changed = false;
     (this.data.equipos || []).forEach(e => {
+      if (TIPOS_ANTERIORES[e.tipo]) { e.tipo = TIPOS_ANTERIORES[e.tipo]; changed = true; }
       if (e.estado === 'De baja') { e.estado = 'Baja'; changed = true; }
       else if (e.estado === 'En reparación') {
         e.estado = 'Disponible';
@@ -149,6 +152,15 @@ const Store = {
         changed = true;
       }
     });
+    if (this.data.demo) {
+      const fuera = new Set((this.data.equipos || []).filter(e => !TIPOS.includes(e.tipo)).map(e => e.id));
+      if (fuera.size) {
+        this.data.equipos = this.data.equipos.filter(e => !fuera.has(e.id));
+        this.data.movimientos = (this.data.movimientos || []).filter(m => !fuera.has(m.equipoId));
+        if (Array.isArray(this.data.solicitudes)) this.data.solicitudes = this.data.solicitudes.filter(s => !fuera.has(s.equipoId));
+        changed = true;
+      }
+    }
     return changed;
   },
   save() {

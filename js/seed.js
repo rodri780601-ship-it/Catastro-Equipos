@@ -25,21 +25,16 @@ const Seed = {
     const strip = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
     const catalogo = {
-      'Notebook': [['Lenovo', 'ThinkPad E14 Gen 5'], ['HP', 'ProBook 440 G10'], ['Dell', 'Latitude 5440']],
-      'Computador de escritorio': [['HP', 'ProDesk 400 G9 SFF'], ['Dell', 'OptiPlex 7010'], ['Lenovo', 'ThinkCentre M70q']],
       'Monitor': [['Samsung', 'S24R350'], ['LG', '24MK430H'], ['Dell', 'P2422H']],
-      'Impresora / Multifuncional': [['HP', 'LaserJet Pro M404dn'], ['Brother', 'MFC-L6900DW'], ['Epson', 'EcoTank L6270']],
-      'Tablet': [['Samsung', 'Galaxy Tab A8'], ['Lenovo', 'Tab M10']],
-      'Teléfono móvil': [['Samsung', 'Galaxy A54'], ['Motorola', 'Moto G84']],
-      'Proyector': [['Epson', 'PowerLite X49']],
-      'Servidor': [['HPE', 'ProLiant DL380 Gen10']],
-      'Equipo de red': [['Cisco', 'Catalyst 1000-24T'], ['Fortinet', 'FortiGate 60F']]
+      'Notebook': [['Lenovo', 'ThinkPad E14 Gen 5'], ['HP', 'ProBook 440 G10'], ['Dell', 'Latitude 5440']],
+      'Impresora': [['HP', 'LaserJet Pro M404dn'], ['Brother', 'MFC-L6900DW'], ['Epson', 'EcoTank L6270']],
+      'Desktop': [['HP', 'ProDesk 400 G9 SFF'], ['Dell', 'OptiPlex 7010'], ['Lenovo', 'ThinkCentre M70q']],
+      'AIO': [['HP', 'ProOne 440 G9 AIO'], ['Lenovo', 'ThinkCentre neo 50a'], ['Dell', 'OptiPlex 7410 AIO']]
     };
     const serialFor = marca => ({
       Lenovo: 'PF' + alnum(6), HP: '5CG' + int(1000, 9999) + alnum(3), Dell: alnum(7),
       Samsung: 'R' + alnum(10), LG: int(100, 999) + 'NT' + alnum(6), Brother: 'U6' + alnum(8),
-      Epson: 'X' + alnum(9), HPE: 'CZJ' + alnum(7), Cisco: 'FOC' + alnum(8), Fortinet: 'FGT60F' + alnum(8),
-      Motorola: 'ZY' + alnum(8)
+      Epson: 'X' + alnum(9)
     }[marca] || alnum(10));
 
     // Ponderación de equipos por región
@@ -56,7 +51,7 @@ const Seed = {
     const contratos = [
       { id: 'c1', codigo: 'ARR-2024-014', proveedor: 'Proveedor Demo Computación S.A.', rutProveedor: '111111', descripcion: 'Arriendo de notebooks y computadores de escritorio a nivel nacional', fechaInicio: addDays(today, -580), fechaTermino: addDays(today, 520), contacto: 'mesadeayuda@computacion-demo.example' },
       { id: 'c2', codigo: 'ARR-2023-007', proveedor: 'Proveedor Demo Impresión Ltda.', rutProveedor: '222222', descripcion: 'Servicio de impresión y multifuncionales con insumos incluidos', fechaInicio: addDays(today, -1050), fechaTermino: addDays(today, 50), contacto: 'soporte@impresion-demo.example' },
-      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'Proveedor Demo Móviles SpA', rutProveedor: '333333', descripcion: 'Arriendo de tablets y equipos móviles para brigadas', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@moviles-demo.example' }
+      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'Proveedor Demo Equipos AIO SpA', rutProveedor: '333333', descripcion: 'Arriendo de computadores AIO para oficinas provinciales', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@aio-demo.example' }
     ];
     contratos.forEach(c => { c.rutProveedor = rutFormat(c.rutProveedor + rutDV(c.rutProveedor)); });
 
@@ -99,9 +94,9 @@ const Seed = {
         const [marca, modelo] = pick(catalogo[tipo]);
         // ¿Arrendado?
         let contratoId = '';
-        if (['Notebook', 'Computador de escritorio'].includes(tipo) && rnd() < 0.45) contratoId = 'c1';
-        else if (tipo === 'Impresora / Multifuncional' && rnd() < 0.7) contratoId = 'c2';
-        else if (['Tablet', 'Teléfono móvil'].includes(tipo) && rnd() < 0.75) contratoId = 'c3';
+        if (['Notebook', 'Desktop'].includes(tipo) && rnd() < 0.45) contratoId = 'c1';
+        else if (tipo === 'Impresora' && rnd() < 0.7) contratoId = 'c2';
+        else if (tipo === 'AIO' && rnd() < 0.75) contratoId = 'c3';
         const c = contratos.find(x => x.id === contratoId);
         const fechaAlta = c ? dateBetween(c.fechaInicio, addDays(c.fechaInicio, 90)) : dateBetween('2018-03-01', addDays(today, -20));
 
@@ -138,7 +133,7 @@ const Seed = {
           eq.motivoBaja = vencido ? 'Devolución a proveedor (fin de arriendo)' : pick(['Obsolescencia técnica', 'Obsolescencia técnica', 'Daño irreparable', 'Robo o hurto']);
           eq.detalleBaja = vencido ? 'Retirado por el proveedor según acta de devolución.' : 'Res. Exenta N° DEMO-' + int(100, 999) + '/' + eq.fechaBaja.slice(0, 4);
           mv(eq, stamp(eq.fechaBaja), 'Baja', `${eq.motivoBaja}. ${eq.detalleBaja}`);
-        } else if (roll < 0.8 && gente.length && !['Servidor', 'Equipo de red'].includes(tipo)) {
+        } else if (roll < 0.8 && gente.length) {
           const p = pick(gente.filter(g => g.activo).length ? gente.filter(g => g.activo) : gente);
           eq.estado = 'Asignado';
           eq.personaId = p.id;
@@ -159,7 +154,7 @@ const Seed = {
     /* ---- Solicitudes de baja de los usuarios regionales: pendientes y algunas ya respondidas ---- */
     const solicitudes = [];
     // Equipos propios vigentes de la región, los más antiguos primero
-    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'Propio' && e.region === r && !['Servidor', 'Equipo de red'].includes(e.tipo))
+    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'Propio' && e.region === r)
       .sort((a, b) => a.fechaAlta < b.fechaAlta ? -1 : 1);
     const rm = candidatos('RM'), vii = candidatos('VII');
     const solicitar = (e, u, motivo, detalle, f) => {

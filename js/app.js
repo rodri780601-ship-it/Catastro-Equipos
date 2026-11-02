@@ -676,7 +676,7 @@
         <div class="form-grid">
           <label class="field"><span>N° de inventario <span class="req">*</span></span><input name="inventario" value="${esc(e.inventario)}" class="mono"><small>Sugerido automáticamente; puede modificarlo.</small></label>
           <label class="field"><span>N° de serie <span class="req">*</span></span><input name="serie" value="${esc(e.serie)}" class="mono"></label>
-          <label class="field"><span>Tipo <span class="req">*</span></span><select name="tipo">${TIPOS.map(t => opt(t, t, e.tipo)).join('')}</select></label>
+          <label class="field"><span>Tipo <span class="req">*</span></span><select name="tipo">${(TIPOS.includes(e.tipo) ? TIPOS : [...TIPOS, e.tipo]).map(t => opt(t, t, e.tipo)).join('')}</select></label>
           <label class="field"><span>Marca <span class="req">*</span></span><input name="marca" value="${esc(e.marca)}" list="dl-marcas"></label>
           <label class="field full"><span>Modelo</span><input name="modelo" value="${esc(e.modelo)}" list="dl-modelos"></label>
           <div class="field full"><span>Propiedad <span class="req">*</span></span>
@@ -1527,21 +1527,18 @@
     if (n.includes('bernardo') || n.includes('ohiggins')) return 'VI';
     return '';
   }
+  // Devuelve uno de los TIPOS, o '' si la planilla trae un tipo que el catastro no maneja
   function matchTipo(v) {
     const n = norm(v);
-    if (!n) return 'Otro';
+    if (!n) return '';
     const exact = TIPOS.find(t => norm(t) === n);
     if (exact) return exact;
+    if (/\baio\b|all.?in.?one|todo en uno/.test(n)) return 'AIO';
     if (/notebook|laptop|portatil/.test(n)) return 'Notebook';
-    if (/escritorio|desktop|cpu|pc\b|computador/.test(n)) return 'Computador de escritorio';
     if (/monitor|pantalla/.test(n)) return 'Monitor';
-    if (/impres|multifunc|scanner|escaner/.test(n)) return 'Impresora / Multifuncional';
-    if (/tablet/.test(n)) return 'Tablet';
-    if (/celular|telefono|movil|smartphone/.test(n)) return 'Teléfono móvil';
-    if (/proyector|data/.test(n)) return 'Proyector';
-    if (/servidor|server/.test(n)) return 'Servidor';
-    if (/switch|router|firewall|red|access point|ap\b/.test(n)) return 'Equipo de red';
-    return 'Otro';
+    if (/impres|multifunc|scanner|escaner/.test(n)) return 'Impresora';
+    if (/escritorio|desktop|cpu|pc\b|computador|torre/.test(n)) return 'Desktop';
+    return '';
   }
   function matchEstado(v) {
     const n = norm(v);
@@ -1576,6 +1573,8 @@
       seenInv.add(norm(inv)); seenSerie.add(norm(serie));
       const region = matchRegion(r.region) || opts.regionDefault;
       if (!region) return res.errores.push(`Fila ${line}: región "${r.region || '(vacía)'}" no reconocida.`);
+      const tipo = matchTipo(r.tipo);
+      if (!tipo) return res.errores.push(`Fila ${line}: tipo "${r.tipo || '(vacío)'}" no reconocido; debe ser ${TIPOS.join(', ')}.`);
       const existing = D().equipos.find(e => norm(e.inventario) === norm(inv));
       const serieOwner = D().equipos.find(e => norm(e.serie) === norm(serie));
       if (serieOwner && serieOwner !== existing) return res.errores.push(`Fila ${line}: la serie ${serie} ya pertenece a ${serieOwner.inventario}.`);
@@ -1605,7 +1604,7 @@
       if (estado === 'Asignado' && !personaRef) estado = 'Disponible';
       const item = {
         existing, data: {
-          inventario: inv, serie, tipo: matchTipo(r.tipo), marca: r.marca || 'Sin marca', modelo: r.modelo || '', propiedad, contratoId, region,
+          inventario: inv, serie, tipo, marca: r.marca || 'Sin marca', modelo: r.modelo || '', propiedad, contratoId, region,
           unidad: UNIDADES.find(u => norm(u) === norm(r.unidad)) || r.unidad || '', ubicacion: r.ubicacion || '', estado,
           reparacion: enReparacion ? { desde: nowStamp(), falla: r.observaciones || 'Importado como en reparación.' } : null,
           personaId: estado === 'Asignado' && personaRef ? personaRef.id : '', fechaAlta: parseFlexDate(r.fechaAlta) || todayISO(),
