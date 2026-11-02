@@ -31,8 +31,8 @@ El sistema viene cargado con datos ficticios de ejemplo. Para partir desde la pl
 
 ## Funcionalidades
 
-- **Panel**: indicadores (vigentes, asignados, disponibles, en reparación, arrendados, bajas del año), distribución por región o unidad, por tipo, alertas y últimos movimientos.
-- **Equipos**: búsqueda por inventario, serie, modelo, funcionario o RUT; filtros por región, tipo, propiedad, contrato y estado; ordenamiento; exportación a Excel.
+- **Panel**: indicadores (vigentes, asignados, disponibles, en servicio técnico, arrendados, bajas del año), distribución por región o unidad, por tipo, alertas y últimos movimientos.
+- **Equipos**: tres estados (Asignado, Disponible, Baja); un equipo Disponible puede estar además *en servicio técnico* mientras se repara. Búsqueda por inventario, serie, modelo, funcionario o RUT; filtros por región, tipo, propiedad, contrato y estado; ordenamiento; exportación a Excel.
 - **Ciclo de vida**: Alta → Asignación → Devolución / Reasignación → Reparación → Baja (o solicitud de baja). Cada acción queda registrada en el historial con fecha y usuario.
 - **Validaciones**: N° de inventario y N° de serie únicos; RUT con dígito verificador; los equipos arrendados exigen contrato.
 - **Acta de entrega** imprimible (por equipo o con todos los equipos de un funcionario).

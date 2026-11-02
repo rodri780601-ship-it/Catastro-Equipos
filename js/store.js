@@ -44,7 +44,8 @@ const UNIDADES = [
   'Unidad de Tecnologías de Información'
 ];
 
-const ESTADOS = ['Asignado', 'Disponible', 'En reparación', 'De baja'];
+// La reparación no es un estado: un equipo Disponible puede estar en servicio técnico (campo `reparacion`)
+const ESTADOS = ['Asignado', 'Disponible', 'Baja'];
 
 const MOTIVOS_BAJA = [
   'Obsolescencia técnica',
@@ -135,13 +136,26 @@ const Store = {
     if (!this.data || !Array.isArray(this.data.equipos)) {
       this.data = Seed.generate();
       this.save();
-    }
+    } else if (this.migrate()) this.save();
+  },
+  // Datos de versiones anteriores: "De baja" pasa a "Baja" y "En reparación" deja de ser un estado
+  migrate() {
+    let changed = false;
+    (this.data.equipos || []).forEach(e => {
+      if (e.estado === 'De baja') { e.estado = 'Baja'; changed = true; }
+      else if (e.estado === 'En reparación') {
+        e.estado = 'Disponible';
+        e.reparacion = { desde: e.actualizado || '', falla: e.observaciones || '' };
+        changed = true;
+      }
+    });
+    return changed;
   },
   save() {
     try { localStorage.setItem(DB_KEY, JSON.stringify(this.data)); return true; }
     catch (e) { console.error(e); return false; }
   },
   reset() { this.data = Seed.generate(); this.save(); },
-  replace(obj) { this.data = obj; this.save(); },
+  replace(obj) { this.data = obj; this.migrate(); this.save(); },
   uid(prefix) { return (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 };

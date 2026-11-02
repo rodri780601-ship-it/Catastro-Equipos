@@ -121,6 +121,7 @@ const Seed = {
           fechaAsignacion: '',
           fechaBaja: '', motivoBaja: '', detalleBaja: '',
           solicitudBaja: null,
+          reparacion: null,
           observaciones: '',
           actualizado: stamp(fechaAlta)
         };
@@ -131,7 +132,7 @@ const Seed = {
         const vencido = c && c.fechaTermino < today;
         const roll = rnd();
         if ((viejo && roll < 0.45) || (!c && roll < 0.05) || (vencido && roll < 0.35)) {
-          eq.estado = 'De baja';
+          eq.estado = 'Baja';
           eq.fechaBaja = vencido ? dateBetween(c.fechaTermino, today) : dateBetween(addDays(fechaAlta, 900), addDays(today, -5));
           if (eq.fechaBaja > today) eq.fechaBaja = addDays(today, -3);
           eq.motivoBaja = vencido ? 'Devolución a proveedor (fin de arriendo)' : pick(['Obsolescencia técnica', 'Obsolescencia técnica', 'Daño irreparable', 'Robo o hurto']);
@@ -145,10 +146,10 @@ const Seed = {
           if (eq.fechaAsignacion > today) eq.fechaAsignacion = today;
           mv(eq, stamp(eq.fechaAsignacion), 'Asignación', `Asignado a ${p.nombre} (${p.rut}).`);
         } else if (roll < 0.86) {
-          eq.estado = 'En reparación';
-          const f = dateBetween(addDays(today, -60), addDays(today, -2));
-          eq.observaciones = 'Enviado a servicio técnico por falla de hardware.';
-          mv(eq, stamp(f), 'Reparación', 'Enviado a servicio técnico por falla de hardware.');
+          // En servicio técnico: sigue Disponible, con la marca de reparación
+          const f = stamp(dateBetween(addDays(today, -60), addDays(today, -2)));
+          eq.reparacion = { desde: f, falla: 'Enviado a servicio técnico por falla de hardware.' };
+          mv(eq, f, 'Reparación', eq.reparacion.falla);
         }
         eq.actualizado = movimientos[movimientos.length - 1].fecha;
         equipos.push(eq);
@@ -158,7 +159,7 @@ const Seed = {
     /* ---- Solicitudes de baja de los usuarios regionales: pendientes y algunas ya respondidas ---- */
     const solicitudes = [];
     // Equipos propios vigentes de la región, los más antiguos primero
-    const candidatos = r => equipos.filter(e => e.estado !== 'De baja' && e.propiedad === 'Propio' && e.region === r && !['Servidor', 'Equipo de red'].includes(e.tipo))
+    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'Propio' && e.region === r && !['Servidor', 'Equipo de red'].includes(e.tipo))
       .sort((a, b) => a.fechaAlta < b.fechaAlta ? -1 : 1);
     const rm = candidatos('RM'), vii = candidatos('VII');
     const solicitar = (e, u, motivo, detalle, f) => {
@@ -179,7 +180,7 @@ const Seed = {
       else {
         const p = personas.find(x => x.id === e.personaId);
         if (p) mv(e, s.resolucion.fecha, 'Devolución', `Devuelto por ${p.nombre} por baja del equipo.`, admin.name);
-        Object.assign(e, { estado: 'De baja', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
+        Object.assign(e, { estado: 'Baja', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
         mv(e, s.resolucion.fecha, 'Baja', `${s.motivo}. ${comentario} (solicitada por ${s.usuario})`, admin.name);
       }
       e.actualizado = s.resolucion.fecha;

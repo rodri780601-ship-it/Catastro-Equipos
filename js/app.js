@@ -74,8 +74,9 @@
 
   /* ---------- Badges ---------- */
   function estadoBadge(e) {
-    const map = { 'Asignado': 'b-ok', 'Disponible': 'b-info', 'En reparación': 'b-warn', 'De baja': 'b-neutral' };
+    const map = { 'Asignado': 'b-ok', 'Disponible': 'b-info', 'Baja': 'b-neutral' };
     return `<span class="badge ${map[e.estado] || 'b-neutral'}"><span class="dot"></span>${esc(e.estado)}</span>` +
+      (e.reparacion ? ` <span class="badge b-warn" title="En reparación desde el ${fmtDate(e.reparacion.desde)}">En servicio técnico</span>` : '') +
       (e.solicitudBaja ? ` <span class="badge b-danger" title="Solicitud de baja pendiente">Baja solicitada</span>` : '');
   }
   const propBadge = e => e.propiedad === 'Arrendado' ? `<span class="badge b-lease">Arrendado</span>` : `<span class="badge b-own">Propio</span>`;
@@ -335,7 +336,7 @@
     return true;
   }
   function resetViewState() {
-    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'vigentes', contrato: '', sort: 'inventario', dir: 1, page: 1 });
+    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', sort: 'inventario', dir: 1, page: 1 });
     Object.assign(fuState, { q: '', region: '', activo: 'activos', page: 1 });
     Object.assign(mvState, { q: '', tipo: '', region: '', desde: '', hasta: '', page: 1 });
   }
@@ -422,11 +423,11 @@
   function renderPanel(el) {
     setTitle('Panel', isAdmin() ? 'Vista nacional' : 'Región ' + regionName(me.region));
     const all = D().equipos.filter(inScope);
-    const vig = all.filter(e => e.estado !== 'De baja');
+    const vig = all.filter(e => e.estado !== 'Baja');
     const count = s => vig.filter(e => e.estado === s).length;
     const arr = vig.filter(e => e.propiedad === 'Arrendado').length;
     const year = todayISO().slice(0, 4);
-    const bajasAno = all.filter(e => e.estado === 'De baja' && (e.fechaBaja || '').startsWith(year)).length;
+    const bajasAno = all.filter(e => e.estado === 'Baja' && (e.fechaBaja || '').startsWith(year)).length;
     const pct = n => vig.length ? Math.round(n / vig.length * 100) : 0;
 
     const kpi = (label, value, foot, color, href) => `
@@ -467,8 +468,8 @@
     });
     const inact = vig.filter(e => e.estado === 'Asignado' && persona(e.personaId) && !persona(e.personaId).activo);
     if (inact.length) alerts.push({ cls: 'warn', icon: 'users', title: `${plural(inact.length, 'equipo')} asignado${inact.length === 1 ? '' : 's'} a funcionarios inactivos`, text: 'Gestione la devolución de estos equipos.', href: '#/equipos?estado=inactivos' });
-    const rep = vig.filter(e => e.estado === 'En reparación');
-    if (rep.length) alerts.push({ cls: 'info', icon: 'wrench', title: `${plural(rep.length, 'equipo')} en reparación`, text: 'Haga seguimiento con el servicio técnico.', href: '#/equipos?estado=En%20reparaci%C3%B3n' });
+    const rep = vig.filter(e => e.reparacion);
+    if (rep.length) alerts.push({ cls: 'info', icon: 'wrench', title: `${plural(rep.length, 'equipo')} en servicio técnico`, text: 'Haga seguimiento con el servicio técnico.', href: '#/equipos?estado=reparacion' });
     const colors = { danger: ['var(--danger-bg)', 'var(--danger)'], warn: ['var(--warn-bg)', 'var(--warn)'], info: ['var(--info-bg)', 'var(--info)'] };
     const alertsHTML = alerts.length ? alerts.map(a => `<a class="alert-item" href="${a.href}"><span class="ic" style="background:${colors[a.cls][0]};color:${colors[a.cls][1]}">${I(a.icon)}</span><div><strong>${esc(a.title)}</strong><span>${esc(a.text)}</span></div></a>`).join('')
       : '<div class="empty" style="padding:20px"><strong>Todo en orden</strong>No hay alertas pendientes.</div>';
@@ -478,12 +479,12 @@
 
     el.innerHTML = `
       <div class="kpis">
-        ${kpi('Equipos vigentes', vig.length, `${plural(all.length - vig.length, 'dado', 'dados')} de baja en total`, 'var(--primary)', '#/equipos')}
+        ${kpi('Equipos vigentes', vig.length, `${plural(all.length - vig.length, 'dado', 'dados')} de baja en total`, 'var(--primary)', '#/equipos?estado=vigentes')}
         ${kpi('Asignados', count('Asignado'), `${pct(count('Asignado'))}% del parque vigente`, 'var(--ok)', '#/equipos?estado=Asignado')}
-        ${kpi('Disponibles', count('Disponible'), 'Listos para asignar', 'var(--info)', '#/equipos?estado=Disponible')}
-        ${kpi('En reparación', count('En reparación'), 'En servicio técnico', 'var(--warn)', '#/equipos?estado=En%20reparaci%C3%B3n')}
+        ${kpi('Disponibles', count('Disponible'), `${count('Disponible') - rep.length} listos para asignar`, 'var(--info)', '#/equipos?estado=Disponible')}
+        ${kpi('En servicio técnico', rep.length, 'Disponibles en reparación', 'var(--warn)', '#/equipos?estado=reparacion')}
         ${kpi('Arrendados', arr, `${pct(arr)}% · ${vig.length - arr} propios`, 'var(--lease)', '#/equipos?propiedad=Arrendado')}
-        ${kpi('Bajas ' + year, bajasAno, 'Dados de baja este año', 'var(--neutral)', '#/equipos?estado=De%20baja')}
+        ${kpi('Bajas ' + year, bajasAno, 'Dados de baja este año', 'var(--neutral)', '#/equipos?estado=Baja')}
       </div>
       <div class="grid g-dash">
         <div class="grid">
@@ -517,14 +518,14 @@
   /* =====================================================
      EQUIPOS — listado
      ===================================================== */
-  const eqState = { q: '', region: '', tipo: '', propiedad: '', estado: 'vigentes', contrato: '', sort: 'inventario', dir: 1, page: 1 };
+  const eqState = { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', sort: 'inventario', dir: 1, page: 1 };
 
   function applyQueryToState(param) {
     // Admite #/equipos?estado=X&region=Y desde el panel
     const qs = (location.hash.split('?')[1] || '');
     if (!qs) return;
     const p = new URLSearchParams(qs);
-    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'vigentes', contrato: '', page: 1 });
+    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', page: 1 });
     p.forEach((v, k) => { if (k in eqState) eqState[k] = v; });
     history.replaceState(null, '', '#/equipos');
   }
@@ -536,7 +537,8 @@
     if (f.tipo) list = list.filter(e => e.tipo === f.tipo);
     if (f.propiedad) list = list.filter(e => e.propiedad === f.propiedad);
     if (f.contrato) list = list.filter(e => e.contratoId === f.contrato);
-    if (f.estado === 'vigentes') list = list.filter(e => e.estado !== 'De baja');
+    if (f.estado === 'vigentes') list = list.filter(e => e.estado !== 'Baja');
+    else if (f.estado === 'reparacion') list = list.filter(e => e.reparacion);
     else if (f.estado === 'solicitud') list = list.filter(e => e.solicitudBaja);
     else if (f.estado === 'inactivos') list = list.filter(e => e.estado === 'Asignado' && persona(e.personaId) && !persona(e.personaId).activo);
     else if (f.estado && f.estado !== 'todos') list = list.filter(e => e.estado === f.estado);
@@ -561,11 +563,14 @@
     applyQueryToState();
     setTitle('Equipos', isAdmin() ? 'Todas las regiones' : 'Región ' + regionName(me.region));
     const f = eqState;
-    const estadoOpts = [['vigentes', 'Vigentes (sin bajas)'], ['todos', 'Todos los estados'], ['Asignado', 'Asignado'], ['Disponible', 'Disponible'], ['En reparación', 'En reparación'], ['solicitud', 'Con solicitud de baja'], ['inactivos', 'Asignados a inactivos'], ['De baja', 'De baja']];
+    const estadoOpts = [['todos', 'Todos los estados'], ...ESTADOS.map(s => [s, s])];
+    // Vistas que se abren desde el Panel: aparecen en la lista solo mientras están activas
+    const vistas = { vigentes: 'Vigentes (sin bajas)', reparacion: 'En servicio técnico', solicitud: 'Con solicitud de baja', inactivos: 'Asignados a inactivos' };
+    if (vistas[f.estado]) estadoOpts.push([f.estado, vistas[f.estado]]);
     el.innerHTML = `
       <div class="toolbar">
         <div class="page-actions">
-          <button class="btn primary" id="btn-alta">${I('plus')}Alta de equipo</button>
+          <button class="btn primary" id="btn-alta">${I('plus')}Ingresar Equipo</button>
           ${isAdmin() ? `<button class="btn" id="btn-import">${I('upload')}Importar Excel</button>` : ''}
           <button class="btn" id="btn-export">${I('download')}Exportar</button>
         </div>
@@ -586,7 +591,7 @@
     ['region', 'tipo', 'propiedad', 'contrato', 'estado'].forEach(k => {
       const s = $('#f-' + k); if (s) s.addEventListener('change', () => { f[k] = s.value; f.page = 1; drawEquiposTable(); });
     });
-    $('#btn-clear').addEventListener('click', () => { Object.assign(f, { q: '', region: '', tipo: '', propiedad: '', estado: 'vigentes', contrato: '', page: 1 }); renderEquipos(el); });
+    $('#btn-clear').addEventListener('click', () => { Object.assign(f, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', page: 1 }); renderEquipos(el); });
     $('#btn-alta').addEventListener('click', () => equipoForm(null));
     $('#btn-export').addEventListener('click', () => exportRows(filterEquipos().map(equipoRow), 'catastro_equipos', 'Equipos'));
     if ($('#btn-import')) $('#btn-import').addEventListener('click', importEquiposModal);
@@ -599,6 +604,7 @@
       'N° inventario': e.inventario, 'N° serie': e.serie, 'Tipo': e.tipo, 'Marca': e.marca, 'Modelo': e.modelo,
       'Propiedad': e.propiedad, 'Contrato': c ? c.codigo : '', 'Proveedor': c ? c.proveedor : '',
       'Región': regionName(e.region), 'Unidad': e.unidad, 'Ubicación': e.ubicacion, 'Estado': e.estado,
+      'En servicio técnico': e.reparacion ? 'Sí' : '',
       'Baja solicitada': e.solicitudBaja ? 'Sí' : '',
       'Responsable': p ? p.nombre : '', 'RUT responsable': p ? p.rut : '', 'Fecha asignación': e.fechaAsignacion ? fmtDate(e.fechaAsignacion) : '',
       'Fecha alta': fmtDate(e.fechaAlta), 'Fecha baja': e.fechaBaja ? fmtDate(e.fechaBaja) : '', 'Motivo baja': e.motivoBaja || '',
@@ -634,7 +640,7 @@
           ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
           <td class="nowrap">${estadoBadge(e)}</td>
           <td class="hide-sm person">${p ? `<span class="name" title="${esc(p.nombre)}">${esc(p.nombre)}</span><span class="sub">${esc(p.unidad || '')}</span>` : '<span class="muted">—</span>'}</td>
-          <td class="actions">${e.estado === 'Disponible' ? `<button class="btn sm" data-assign="${e.id}" title="Asignar">${I('assign')}<span class="hide-sm">Asignar</span></button>` : ''}</td>
+          <td class="actions">${e.estado === 'Disponible' && !e.reparacion ? `<button class="btn sm" data-assign="${e.id}" title="Asignar">${I('assign')}<span class="hide-sm">Asignar</span></button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody></table></div>${pagerHTML(pg)}`;
 
@@ -790,13 +796,16 @@
         <p style="margin:0">Devuelto por <b>${esc(p ? p.nombre : '—')}</b>${p ? ' · ' + esc(p.rut) : ''}</p>
         <div class="form-grid">
           <label class="field"><span>Fecha de devolución</span><input type="date" name="fecha" value="${todayISO()}" max="${todayISO()}"></label>
-          <label class="field"><span>Estado en que queda</span><select name="estado">${opt('Disponible', 'Disponible (en buen estado)')}${opt('En reparación', 'Requiere reparación')}</select></label>
+          <label class="field"><span>Estado en que queda</span><select name="condicion">${opt('ok', 'Disponible (en buen estado)')}${opt('reparacion', 'Disponible, requiere reparación')}</select></label>
         </div>
         <label class="field"><span>Observación</span><textarea name="obs" rows="2" placeholder="Estado del equipo, accesorios recibidos…"></textarea></label>`,
       onSubmit: fd => {
-        e.estado = fd.estado; e.personaId = ''; e.fechaAsignacion = '';
+        e.estado = 'Disponible'; e.personaId = ''; e.fechaAsignacion = '';
         log(e, 'Devolución', `Devuelto por ${p ? p.nombre + ' (' + p.rut + ')' : 'responsable'} el ${fmtDate(fd.fecha)}.${fd.obs ? ' ' + fd.obs : ''}`);
-        if (fd.estado === 'En reparación') log(e, 'Reparación', 'Enviado a reparación tras la devolución.');
+        if (fd.condicion === 'reparacion') {
+          e.reparacion = { desde: nowStamp(), falla: fd.obs || 'Requiere reparación tras la devolución.' };
+          log(e, 'Reparación', 'Enviado a reparación tras la devolución.');
+        }
         save(); toast('Devolución registrada.'); route();
       }
     });
@@ -810,12 +819,14 @@
         <label class="field"><span>${retorno ? 'Resultado de la reparación' : 'Falla reportada / servicio técnico'} <span class="req">*</span></span><textarea name="obs" rows="3"></textarea></label>`,
       onSubmit: (fd, form) => {
         if (!fd.obs) return fieldError(form, 'obs', 'Describa brevemente.');
+        // La reparación no cambia el estado: el equipo queda Disponible y marcado en servicio técnico
         if (retorno) {
-          e.estado = 'Disponible';
+          e.reparacion = null;
           log(e, 'Retorno de reparación', fd.obs);
         } else {
           if (e.personaId) { const p = persona(e.personaId); log(e, 'Devolución', `Devuelto por ${p ? p.nombre : 'responsable'} para reparación.`); }
-          e.personaId = ''; e.fechaAsignacion = ''; e.estado = 'En reparación';
+          e.personaId = ''; e.fechaAsignacion = ''; e.estado = 'Disponible';
+          e.reparacion = { desde: nowStamp(), falla: fd.obs };
           log(e, 'Reparación', fd.obs);
         }
         save(); toast(retorno ? 'Equipo disponible nuevamente.' : 'Equipo enviado a reparación.'); route();
@@ -843,7 +854,7 @@
           if (!fd.fecha) return fieldError(form, 'fecha', 'Ingrese la fecha de baja.');
           if (e.personaId) { const p = persona(e.personaId); log(e, 'Devolución', `Devuelto por ${p ? p.nombre : 'responsable'} por baja del equipo.`); }
           if (sol) resolverSolicitud(e, 'Aprobada', `Baja registrada con fecha ${fmtDate(fd.fecha)}.${fd.detalle ? ' ' + fd.detalle : ''}`);
-          Object.assign(e, { estado: 'De baja', personaId: '', fechaAsignacion: '', fechaBaja: fd.fecha, motivoBaja: fd.motivo, detalleBaja: fd.detalle, solicitudBaja: null });
+          Object.assign(e, { estado: 'Baja', personaId: '', fechaAsignacion: '', fechaBaja: fd.fecha, motivoBaja: fd.motivo, detalleBaja: fd.detalle, solicitudBaja: null, reparacion: null });
           log(e, 'Baja', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}${sol ? ` (solicitada por ${sol.usuario})` : ''}`);
           toast(`${e.inventario} dado de baja.`);
         } else {
@@ -881,13 +892,13 @@
     }
     setTitle('Ficha de equipo', e.inventario);
     const p = persona(e.personaId), c = contrato(e.contratoId);
-    const baja = e.estado === 'De baja';
+    const baja = e.estado === 'Baja';
     const btn = (act, icon, label, cls = '') => `<button class="btn ${cls}" data-act="${act}">${I(icon)}${label}</button>`;
     const acts = [];
     if (!baja) {
-      if (e.estado === 'Disponible') acts.push(btn('asignar', 'assign', 'Asignar', 'primary'));
+      if (e.estado === 'Disponible' && !e.reparacion) acts.push(btn('asignar', 'assign', 'Asignar', 'primary'));
       if (e.estado === 'Asignado') acts.push(btn('devolver', 'undo', 'Registrar devolución', 'primary'), btn('asignar', 'assign', 'Reasignar'), btn('acta', 'printer', 'Acta de entrega'));
-      if (e.estado === 'En reparación') acts.push(btn('retorno', 'check', 'Retorno de reparación', 'primary'));
+      if (e.reparacion) acts.push(btn('retorno', 'check', 'Retorno de reparación', 'primary'));
       else acts.push(btn('reparar', 'wrench', 'Enviar a reparación'));
       acts.push(btn('editar', 'edit', 'Editar'));
       if (!e.solicitudBaja) acts.push(btn('baja', 'trash', isAdmin() ? 'Dar de baja' : 'Solicitar baja'));
@@ -900,6 +911,8 @@
         ${isAdmin() ? `<div class="page-actions"><button class="btn sm danger" data-act="aprobar">Aprobar baja</button><button class="btn sm" data-act="rechazar">Rechazar</button></div>` : `<button class="btn sm" data-act="cancelar-sol">Retirar solicitud</button>`}</div>`;
     } else if (baja) {
       callout = `<div class="callout" style="background:var(--neutral-bg);margin-bottom:16px">${I('trash')}<div><b>Dado de baja</b> el ${fmtDate(e.fechaBaja)} · ${esc(e.motivoBaja)}${e.detalleBaja ? '<br>' + esc(e.detalleBaja) : ''}</div></div>`;
+    } else if (e.reparacion) {
+      callout = `<div class="callout warn" style="margin-bottom:16px">${I('wrench')}<div><b>En servicio técnico</b> desde el ${fmtDate(e.reparacion.desde)}${e.reparacion.falla ? ' · ' + esc(e.reparacion.falla) : ''}<br>No se puede asignar hasta registrar el retorno de reparación.</div></div>`;
     } else if (c && contratoStatus(c).left < 0) {
       callout = `<div class="callout danger" style="margin-bottom:16px">${I('clock')}<div>El contrato de arriendo <b>${esc(c.codigo)}</b> venció el ${fmtDate(c.fechaTermino)}. Coordine la devolución al proveedor o la renovación.</div></div>`;
     } else if (p && !p.activo) {
@@ -1236,7 +1249,7 @@
       <div class="contracts">${list.map(c => {
         const st = contratoStatus(c);
         const eqs = D().equipos.filter(e => e.contratoId === c.id && inScope(e));
-        const vig = eqs.filter(e => e.estado !== 'De baja');
+        const vig = eqs.filter(e => e.estado !== 'Baja');
         const total = Math.max(1, daysBetween(c.fechaInicio, c.fechaTermino));
         const elapsed = Math.min(100, Math.max(0, daysBetween(c.fechaInicio, todayISO()) / total * 100));
         return `<section class="panel contract">
@@ -1524,8 +1537,7 @@
   }
   function matchEstado(v) {
     const n = norm(v);
-    if (/baja/.test(n)) return 'De baja';
-    if (/repar|servicio tecnico|falla/.test(n)) return 'En reparación';
+    if (/baja/.test(n)) return 'Baja';
     if (/asign|en uso|uso/.test(n)) return 'Asignado';
     if (/dispon|bodega|stock|libre/.test(n)) return 'Disponible';
     return '';
@@ -1579,12 +1591,15 @@
           else res.errores.push(`Fila ${line}: responsable "${r.responsable || r.rut}" no encontrado (se requiere RUT y nombre para crearlo).`);
         }
       }
-      let estado = matchEstado(r.estado) || (personaRef ? 'Asignado' : 'Disponible');
+      // "En reparación" en la planilla: queda Disponible y marcado en servicio técnico
+      const enReparacion = /repar|servicio tecnico|falla/.test(norm(r.estado));
+      let estado = (enReparacion ? 'Disponible' : matchEstado(r.estado)) || (personaRef ? 'Asignado' : 'Disponible');
       if (estado === 'Asignado' && !personaRef) estado = 'Disponible';
       const item = {
         existing, data: {
           inventario: inv, serie, tipo: matchTipo(r.tipo), marca: r.marca || 'Sin marca', modelo: r.modelo || '', propiedad, contratoId, region,
           unidad: UNIDADES.find(u => norm(u) === norm(r.unidad)) || r.unidad || '', ubicacion: r.ubicacion || '', estado,
+          reparacion: enReparacion ? { desde: nowStamp(), falla: r.observaciones || 'Importado como en reparación.' } : null,
           personaId: estado === 'Asignado' && personaRef ? personaRef.id : '', fechaAlta: parseFlexDate(r.fechaAlta) || todayISO(),
           observaciones: r.observaciones || ''
         }, persona: estado === 'Asignado' ? personaRef : null
@@ -1629,7 +1644,7 @@
         if (!res.nuevos.length && !res.actualizar.length) { toast('No hay filas válidas para importar.', 'error'); return false; }
         (res.personas || []).forEach(p => { delete p._new; D().personas.push(p); });
         res.nuevos.forEach(it => {
-          const e = Object.assign({ id: Store.uid('e'), fechaAsignacion: it.data.personaId ? it.data.fechaAlta : '', fechaBaja: it.data.estado === 'De baja' ? todayISO() : '', motivoBaja: it.data.estado === 'De baja' ? 'Otro' : '', detalleBaja: it.data.estado === 'De baja' ? 'Importado como dado de baja.' : '', solicitudBaja: null }, it.data);
+          const e = Object.assign({ id: Store.uid('e'), fechaAsignacion: it.data.personaId ? it.data.fechaAlta : '', fechaBaja: it.data.estado === 'Baja' ? todayISO() : '', motivoBaja: it.data.estado === 'Baja' ? 'Otro' : '', detalleBaja: it.data.estado === 'Baja' ? 'Importado como dado de baja.' : '', solicitudBaja: null }, it.data);
           D().equipos.push(e);
           log(e, 'Alta', `Importado desde ${fileName}. ${e.tipo} ${e.marca} ${e.modelo}, ${e.propiedad.toLowerCase()}.`);
           if (it.persona) log(e, 'Asignación', `Asignado a ${it.persona.nombre} (${it.persona.rut}) según planilla.`);
@@ -1639,7 +1654,7 @@
           const before = e.personaId;
           Object.assign(e, it.data);
           if (e.personaId && e.personaId !== before) e.fechaAsignacion = todayISO();
-          if (e.estado === 'De baja' && !e.fechaBaja) { e.fechaBaja = todayISO(); e.motivoBaja = 'Otro'; }
+          if (e.estado === 'Baja' && !e.fechaBaja) { e.fechaBaja = todayISO(); e.motivoBaja = 'Otro'; }
           log(e, 'Modificación', `Actualizado desde ${fileName}.`);
         });
         save();
