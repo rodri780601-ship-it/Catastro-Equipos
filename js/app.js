@@ -315,6 +315,22 @@
     $('#login-view').classList.remove('hidden');
     $('#login-form').reset();
     $('#login-error').classList.add('hidden');
+    renderLoginAccounts();
+  }
+  // Accesos rápidos de la portada: solo cuentas que existen y conservan su contraseña de demostración
+  function renderLoginAccounts() {
+    const d = D();
+    let visibles = 0;
+    $$('.demo-acc').forEach(b => {
+      const u = d.users.find(x => x.username === b.dataset.u && x.active);
+      const ok = !!u && u.passHash === hashPass(b.dataset.u, b.dataset.p);
+      b.classList.toggle('hidden', !ok);
+      if (ok) visibles++;
+    });
+    $('.demo-box').classList.toggle('hidden', !visibles);
+    $('#demo-note').textContent = d.demo
+      ? 'Los datos cargados son ficticios: nombres, RUT, correos y proveedores no corresponden a personas ni empresas reales.'
+      : 'El sistema no tiene datos de ejemplo. Ingrese como administrador y, en Importar / respaldo, importe su planilla o cargue los datos de ejemplo.';
   }
   function startApp() {
     $('#login-view').classList.add('hidden');
@@ -477,7 +493,11 @@
     const mvs = D().movimientos.filter(inScope).slice(-7).reverse();
     const mvHTML = mvs.map(m => `<li style="--tl:${tlColor(m.tipo)}"><div class="t-head"><span class="t-type">${esc(m.tipo)}</span><a class="mono" href="#/equipo/${m.equipoId}">${esc(m.inventario)}</a><span class="t-date">${fmtDateTime(m.fecha)}</span></div><div class="t-body">${esc(m.detalle)}</div></li>`).join('');
 
-    el.innerHTML = `
+    const vacio = !all.length ? `<div class="callout info" style="margin-bottom:18px">${I('database')}<div class="grow"><b>Aún no hay equipos registrados${isAdmin() ? '' : ' en su región'}.</b> ${isAdmin()
+      ? 'Ingrese equipos uno a uno, importe la planilla Excel o cargue los datos de ejemplo para conocer el sistema.'
+      : 'Puede ingresarlos con Equipos › Ingresar Equipo.'}</div>${isAdmin() ? `<a class="btn sm" href="#/respaldo">Ir a Importar / respaldo</a>` : ''}</div>` : '';
+
+    el.innerHTML = `${vacio}
       <div class="kpis">
         ${kpi('Equipos vigentes', vig.length, `${plural(all.length - vig.length, 'dado', 'dados')} de baja en total`, 'var(--primary)', '#/equipos?estado=vigentes')}
         ${kpi('Asignados', count('Asignado'), `${pct(count('Asignado'))}% del parque vigente`, 'var(--ok)', '#/equipos?estado=Asignado')}
@@ -1414,6 +1434,7 @@
   function renderRespaldo(el) {
     setTitle('Importar y respaldar', 'Migración desde Excel y copias de seguridad');
     const d = D();
+    const vacio = !d.equipos.length && !d.personas.length && !d.contratos.length;
     el.innerHTML = `
       <div class="grid g-3">
         <section class="panel tool-card"><span class="ic">${I('upload')}</span><h3>Importar equipos desde Excel</h3>
@@ -1437,20 +1458,28 @@
           <div><dt>Excel</dt><dd>${window.XLSX ? 'Disponible (.xlsx)' : 'Sin conexión: solo CSV'}</dd></div>
         </dl></div>
       </section>
-      <section class="panel tool-card danger" style="margin-top:18px;flex-direction:row;align-items:center;flex-wrap:wrap">
+      <section class="panel tool-card" style="margin-top:18px;flex-direction:row;align-items:center;flex-wrap:wrap">
         <span class="ic">${I('refresh')}</span>
-        <div style="flex:1;min-width:240px"><h3>Restablecer datos de demostración</h3><p>Borra toda la información guardada en este navegador y vuelve a cargar los datos ficticios de ejemplo.</p></div>
-        <button class="btn danger" id="b-reset">Restablecer</button>
+        <div style="flex:1;min-width:240px"><h3>Datos de ejemplo</h3>
+          <p>${d.demo ? 'El sistema tiene cargados los datos de ejemplo (ficticios).' : vacio ? 'El sistema está vacío.' : 'El sistema tiene datos registrados.'}
+          Cargue el ejemplo para conocer el sistema, o limpie todo para partir desde cero con su propia información.</p></div>
+        <div class="page-actions"><button class="btn" id="b-demo">${I('download')}Cargar datos de ejemplo</button><button class="btn danger" id="b-clear">${I('trash')}Limpiar todos los datos</button></div>
       </section>`;
     $('#b-import').addEventListener('click', importEquiposModal);
     $('#b-template').addEventListener('click', downloadTemplate);
     $('#b-export-all').addEventListener('click', () => exportRows(D().equipos.slice().sort((a, b) => a.inventario.localeCompare(b.inventario, 'es', { numeric: true })).map(equipoRow), 'catastro_equipos_nacional', 'Catastro'));
     $('#b-backup').addEventListener('click', () => { downloadBlob(JSON.stringify(D(), null, 1), `respaldo_catastro_${todayISO()}.json`, 'application/json'); toast('Respaldo descargado.'); });
     $('#b-restore').addEventListener('click', restoreModal);
-    $('#b-reset').addEventListener('click', () => confirmDialog({
-      title: 'Restablecer datos de demostración', danger: true, confirmLabel: 'Borrar y restablecer',
-      message: 'Se eliminará <b>toda</b> la información registrada en este navegador. Descargue un respaldo antes si desea conservarla. Las contraseñas vuelven a ser las de demostración.',
-      onConfirm: () => { Store.reset(); me = D().users.find(u => u.id === 'u_admin'); try { sessionStorage.setItem(SESSION_KEY, me.id); } catch (e) { /* */ } toast('Datos restablecidos.'); startApp(); setTimeout(route, 0); }
+    const conDatosReales = !d.demo && !vacio;
+    $('#b-demo').addEventListener('click', () => confirmDialog({
+      title: 'Cargar datos de ejemplo', danger: conDatosReales, confirmLabel: 'Cargar ejemplo',
+      message: `${vacio ? '' : 'Se reemplazará <b>toda</b> la información guardada en este navegador. '}Se cargarán equipos, funcionarios, contratos y solicitudes ficticios, y las cuentas de demostración (admin, usuario.maule y usuario.rm, con sus contraseñas de demostración).${conDatosReales ? ' Descargue antes un respaldo si desea conservar su información.' : ''}`,
+      onConfirm: () => { Store.reset(); me = D().users.find(u => u.id === 'u_admin'); try { sessionStorage.setItem(SESSION_KEY, me.id); } catch (e) { /* */ } resetViewState(); toast('Datos de ejemplo cargados.'); startApp(); setTimeout(route, 0); }
+    }));
+    $('#b-clear').addEventListener('click', () => confirmDialog({
+      title: 'Limpiar todos los datos', danger: true, confirmLabel: 'Borrar todo',
+      message: `Se eliminarán <b>todos</b> los equipos, funcionarios, contratos, movimientos y solicitudes, y las demás cuentas de usuario. Solo se conserva su cuenta (<b>${esc(me.username)}</b>), con su contraseña actual.${conDatosReales ? ' Descargue antes un respaldo si desea conservar su información.' : ''} Esta acción no se puede deshacer.`,
+      onConfirm: () => { Store.clear(me); me = D().users[0]; resetViewState(); toast('Se eliminaron todos los datos.'); startApp(); setTimeout(route, 0); }
     }));
   }
 

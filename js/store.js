@@ -134,9 +134,17 @@ const Store = {
       this.data = raw ? JSON.parse(raw) : null;
     } catch (e) { this.data = null; }
     if (!this.data || !Array.isArray(this.data.equipos)) {
-      this.data = Seed.generate();
+      this.data = this.empty();
       this.save();
     } else if (this.migrate()) this.save();
+  },
+  // Catastro sin datos: solo una cuenta de administrador (la indicada, o admin / admin123 la primera vez)
+  empty(admin) {
+    return {
+      version: 1, demo: false, creado: new Date().toISOString(), nextInventario: 10001,
+      users: [admin || { id: 'u_admin', username: 'admin', name: 'Administrador General', email: '', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') }],
+      personas: [], contratos: [], equipos: [], movimientos: [], solicitudes: []
+    };
   },
   // Datos de versiones anteriores: "De baja" pasa a "Baja", "En reparación" deja de ser un estado
   // y los tipos con equivalente se renombran. En datos reales los demás tipos se conservan tal cual;
@@ -168,6 +176,7 @@ const Store = {
     catch (e) { console.error(e); return false; }
   },
   reset() { this.data = Seed.generate(); this.save(); },
+  clear(admin) { this.data = this.empty(admin); this.save(); },
   replace(obj) { this.data = obj; this.migrate(); this.save(); },
   uid(prefix) { return (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 };
