@@ -670,8 +670,8 @@
     const marcas = [...new Set(D().equipos.map(x => x.marca))].sort();
     const modelos = [...new Set(D().equipos.map(x => x.modelo))].sort();
     openModal({
-      title: isNew ? 'Alta de equipo' : 'Editar equipo ' + e.inventario, size: 'lg',
-      submitLabel: isNew ? 'Registrar alta' : 'Guardar cambios',
+      title: isNew ? 'Ingresar equipo' : 'Editar equipo ' + e.inventario, size: 'lg',
+      submitLabel: isNew ? 'Ingresar equipo' : 'Guardar cambios',
       body: `
         <div class="form-grid">
           <label class="field"><span>N° de inventario <span class="req">*</span></span><input name="inventario" value="${esc(e.inventario)}" class="mono"><small>Sugerido automáticamente; puede modificarlo.</small></label>
@@ -687,7 +687,7 @@
           <label class="field"><span>Región <span class="req">*</span></span>
             <select name="region" ${isAdmin() ? '' : 'disabled'}>${regionOptions(e.region, 'Seleccione región…')}</select>
             ${!isNew && isAdmin() ? '<small>Si cambia la región, se registra como traslado.</small>' : ''}</label>
-          <label class="field"><span>Unidad / departamento</span><select name="unidad">${opt('', 'Seleccione…', e.unidad)}${UNIDADES.map(u => opt(u, u, e.unidad)).join('')}</select></label>
+          ${unidadField(e.unidad)}
           <label class="field"><span>Ubicación física</span><input name="ubicacion" value="${esc(e.ubicacion)}" placeholder="Ej.: Oficina 204, Bodega TI"></label>
           <label class="field"><span>Fecha de alta <span class="req">*</span></span><input type="date" name="fechaAlta" value="${esc(e.fechaAlta)}" max="${todayISO()}"></label>
           <label class="field full"><span>Observaciones</span><textarea name="observaciones" rows="2">${esc(e.observaciones)}</textarea></label>
@@ -1178,6 +1178,14 @@
     draw();
   }
 
+  // Unidad / departamento: lista del catálogo y de las unidades ya escritas a mano, o texto libre
+  function unidadField(value) {
+    const propias = [...D().equipos, ...D().personas].map(x => x.unidad).filter(u => u && !UNIDADES.includes(u));
+    const unidades = [...UNIDADES, ...[...new Set(propias)].sort((a, b) => a.localeCompare(b, 'es'))];
+    return `<label class="field"><span>Unidad / departamento</span><input name="unidad" value="${esc(value || '')}" list="dl-unidades" placeholder="Elija de la lista o escriba" autocomplete="off"></label>
+      <datalist id="dl-unidades">${unidades.map(u => `<option value="${esc(u)}">`).join('')}</datalist>`;
+  }
+
   function personaForm(p, region, onDone) {
     const isNew = !p;
     const x = p || { rut: '', nombre: '', cargo: '', unidad: '', region: region || '', email: '', activo: true };
@@ -1187,7 +1195,7 @@
         <label class="field"><span>RUT <span class="req">*</span></span><input name="rut" value="${esc(x.rut)}" placeholder="12.345.678-9" class="mono"></label>
         <label class="field"><span>Nombre completo <span class="req">*</span></span><input name="nombre" value="${esc(x.nombre)}"></label>
         <label class="field"><span>Cargo</span><input name="cargo" value="${esc(x.cargo)}"></label>
-        <label class="field"><span>Unidad / departamento</span><select name="unidad">${opt('', 'Seleccione…', x.unidad)}${UNIDADES.map(u => opt(u, u, x.unidad)).join('')}</select></label>
+        ${unidadField(x.unidad)}
         <label class="field"><span>Región <span class="req">*</span></span><select name="region" ${isAdmin() ? '' : 'disabled'}>${regionOptions(x.region || (isAdmin() ? '' : me.region), 'Seleccione…')}</select></label>
         <label class="field"><span>Correo institucional</span><input type="email" name="email" value="${esc(x.email)}" placeholder="nombre.apellido@conaf.cl"></label>
         ${isNew ? '' : `<label class="check full"><input type="checkbox" name="activo" value="1" ${x.activo ? 'checked' : ''}> Funcionario activo</label>`}
