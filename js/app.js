@@ -1479,8 +1479,8 @@
     }));
     $('#b-clear').addEventListener('click', () => confirmDialog({
       title: 'Limpiar todos los datos', danger: true, confirmLabel: 'Borrar todo',
-      message: `Se eliminarán <b>todos</b> los equipos, funcionarios, contratos, movimientos y solicitudes, y las demás cuentas de usuario. Solo se conserva su cuenta (<b>${esc(me.username)}</b>), con su contraseña actual.${conDatosReales ? ' Descargue antes un respaldo si desea conservar su información.' : ''} Esta acción no se puede deshacer.`,
-      onConfirm: () => { Store.clear(me); me = D().users[0]; resetViewState(); toast('Se eliminaron todos los datos.'); startApp(); setTimeout(route, 0); }
+      message: `Se eliminarán <b>todos</b> los equipos, funcionarios, contratos, movimientos y solicitudes. Las cuentas de usuario se conservan, con sus contraseñas actuales.${conDatosReales ? ' Descargue antes un respaldo si desea conservar su información.' : ''} Esta acción no se puede deshacer.`,
+      onConfirm: () => { Store.clear(); me = D().users.find(u => u.id === me.id) || me; resetViewState(); toast('Se eliminaron todos los datos.'); startApp(); setTimeout(route, 0); }
     }));
   }
 

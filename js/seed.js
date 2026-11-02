@@ -41,11 +41,7 @@ const Seed = {
     const peso = { OC: 3, RM: 2, VIII: 2, IX: 2, VII: 2, X: 1.5, V: 1.5 };
 
     /* ---- Usuarios del sistema ---- */
-    const users = [
-      { id: 'u_admin', username: 'admin', name: 'Administrador General', email: 'admin@conaf.example', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') },
-      { id: 'u_maule', username: 'usuario.maule', name: 'Encargado TI Maule', email: 'ti.maule@conaf.example', role: 'usuario', region: 'VII', active: true, passHash: hashPass('usuario.maule', 'usuario123') },
-      { id: 'u_rm', username: 'usuario.rm', name: 'Encargada TI Metropolitana', email: 'ti.rm@conaf.example', role: 'usuario', region: 'RM', active: true, passHash: hashPass('usuario.rm', 'usuario123') }
-    ];
+    const users = cuentasDemo();
 
     /* ---- Contratos de arriendo (fechas relativas a hoy) ---- */
     const contratos = [

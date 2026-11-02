@@ -125,6 +125,27 @@ function todayISO() { return isoDate(new Date()); }
 function addDays(iso, n) { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return isoDate(d); }
 function daysBetween(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
 
+/* ---------- Cuentas de ejemplo ---------- */
+// Están siempre disponibles, con o sin datos de ejemplo; se pueden deshabilitar en Usuarios.
+function cuentasDemo() {
+  return [
+    { id: 'u_admin', username: 'admin', name: 'Administrador General', email: 'admin@conaf.example', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') },
+    { id: 'u_maule', username: 'usuario.maule', name: 'Encargado TI Maule', email: 'ti.maule@conaf.example', role: 'usuario', region: 'VII', active: true, passHash: hashPass('usuario.maule', 'usuario123') },
+    { id: 'u_rm', username: 'usuario.rm', name: 'Encargada TI Metropolitana', email: 'ti.rm@conaf.example', role: 'usuario', region: 'RM', active: true, passHash: hashPass('usuario.rm', 'usuario123') }
+  ];
+}
+// Agrega las cuentas de ejemplo que falten (por nombre de usuario); las existentes no se tocan
+function completarCuentasDemo(users) {
+  let agregadas = 0;
+  cuentasDemo().forEach(c => {
+    if (!users.some(u => u.username.toLowerCase() === c.username)) {
+      if (users.some(u => u.id === c.id)) c.id = c.id + '_' + Date.now().toString(36);
+      users.push(c); agregadas++;
+    }
+  });
+  return agregadas;
+}
+
 /* ---------- Persistencia ---------- */
 const Store = {
   data: null,
@@ -138,12 +159,13 @@ const Store = {
       this.save();
     } else if (this.migrate()) this.save();
   },
-  // Catastro sin datos: solo una cuenta de administrador (la indicada, o admin / admin123 la primera vez)
-  empty(admin) {
+  // Catastro sin datos: conserva las cuentas indicadas (con sus contraseñas) y agrega las de ejemplo que falten
+  empty(users) {
+    const cuentas = users ? users.slice() : [];
+    completarCuentasDemo(cuentas);
     return {
       version: 1, demo: false, creado: new Date().toISOString(), nextInventario: 10001,
-      users: [admin || { id: 'u_admin', username: 'admin', name: 'Administrador General', email: '', role: 'admin', region: '', active: true, passHash: hashPass('admin', 'admin123') }],
-      personas: [], contratos: [], equipos: [], movimientos: [], solicitudes: []
+      users: cuentas, personas: [], contratos: [], equipos: [], movimientos: [], solicitudes: []
     };
   },
   // Datos de versiones anteriores: "De baja" pasa a "Baja", "En reparación" deja de ser un estado
@@ -151,6 +173,7 @@ const Store = {
   // en los datos de demostración, los equipos de tipos fuera del catálogo se eliminan.
   migrate() {
     let changed = false;
+    if (Array.isArray(this.data.users) && completarCuentasDemo(this.data.users)) changed = true;
     (this.data.equipos || []).forEach(e => {
       if (TIPOS_ANTERIORES[e.tipo]) { e.tipo = TIPOS_ANTERIORES[e.tipo]; changed = true; }
       if (e.estado === 'De baja') { e.estado = 'Baja'; changed = true; }
@@ -176,7 +199,7 @@ const Store = {
     catch (e) { console.error(e); return false; }
   },
   reset() { this.data = Seed.generate(); this.save(); },
-  clear(admin) { this.data = this.empty(admin); this.save(); },
+  clear() { this.data = this.empty(this.data.users); this.save(); },
   replace(obj) { this.data = obj; this.migrate(); this.save(); },
   uid(prefix) { return (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 };
