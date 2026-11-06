@@ -309,7 +309,7 @@
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana. Permita ventanas emergentes para imprimir el acta.', 'error');
     const folio = 'AE-' + eqs[0].region + '-' + Date.now().toString().slice(-6);
-    const rows = eqs.map((e, i) => `<tr><td>${i + 1}</td><td>${esc(e.inventario)}</td><td>${esc(e.formato || '—')}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td>${esc(e.serie || '—')}</td><td>${e.pantallaModelo || e.pantallaSerie ? esc(e.pantallaModelo) + (e.pantallaSerie ? '<br><small>S/N ' + esc(e.pantallaSerie) + '</small>' : '') : '—'}</td><td>${esc(e.propiedad || '—')}${e.proveedor ? '<br><small>' + esc(e.proveedor) + '</small>' : ''}</td></tr>`).join('');
+    const rows = eqs.map((e, i) => `<tr><td>${i + 1}</td><td>${esc(e.inventario)}</td><td>${esc(e.formato || '—')}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td>${esc(e.serie || '—')}</td><td>${e.pantallaModelo || e.pantallaSerie ? esc(e.pantallaModelo) + (e.pantallaSerie ? '<br><small>S/N ' + esc(e.pantallaSerie) + '</small>' : '') : '—'}${e.monitor2Marca || e.monitor2Serie ? '<br>' + esc(e.monitor2Marca) + (e.monitor2Serie ? '<br><small>S/N ' + esc(e.monitor2Serie) + '</small>' : '') : ''}</td><td>${esc(e.propiedad || '—')}${e.proveedor ? '<br><small>' + esc(e.proveedor) + '</small>' : ''}</td></tr>`).join('');
     w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acta de entrega ${esc(folio)}</title>
       <style>
         body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:36px;font-size:13px;line-height:1.45}
@@ -613,7 +613,7 @@
     if (f.q) {
       const terms = norm(f.q).split(/\s+/);
       list = list.filter(e => {
-        const hay = norm([e.inventario, e.rut, rutClean(e.rut), e.nombre, e.oficina, e.marca, e.modelo, e.formato, e.serie, e.propiedad, e.proveedor, e.fechaArriendo, e.pantallaModelo, e.pantallaSerie, regionName(e.region)].join(' '));
+        const hay = norm([e.inventario, e.rut, rutClean(e.rut), e.nombre, e.oficina, e.marca, e.modelo, e.formato, e.serie, e.propiedad, e.proveedor, e.fechaArriendo, e.pantallaModelo, e.pantallaSerie, e.monitor2Marca, e.monitor2Serie, regionName(e.region)].join(' '));
         return terms.every(t => hay.includes(t));
       });
     }
@@ -727,7 +727,7 @@
   const nextOrden = () => { const d = D(); if (!d.nextOrden) d.nextOrden = d.equipos.reduce((m, e) => Math.max(m, e.orden || 0), 0) + 1; return d.nextOrden++; };
   const datalist = (id, values) => `<datalist id="${id}">${[...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')).slice(0, 400).map(m => `<option value="${esc(m)}">`).join('')}</datalist>`;
 
-  // Campos en el mismo orden que las columnas de la planilla
+  // Campos en el orden de las columnas de la planilla, salvo el monitor, que va bajo Formato y Número de serie
   function equipoForm(eq, onDone) {
     const isNew = !eq;
     const e = eq || { inventario: nextInventario(), rut: '', nombre: NOMBRE_DISPONIBLE, region: isAdmin() ? '' : me.region, oficina: '', marca: '', modelo: '', formato: '', serie: '', propiedad: 'CONAF', proveedor: '', fechaArriendo: '', pantallaModelo: '', pantallaSerie: '', contratoId: '', fechaAlta: todayISO(), observaciones: '' };
@@ -736,6 +736,12 @@
     const formatos = FORMATOS.includes((e.formato || '').toUpperCase()) || !e.formato ? FORMATOS : [...FORMATOS, e.formato];
     // RUT y nombre se editan a mano solo cuando el equipo figura asignado a alguien sin ficha de funcionario
     const editarTrabajador = !isNew && e.estado === 'Asignado' && !e.personaId;
+    // El monitor se pide solo en DESKTOP; si un equipo de otro formato ya lo trae (planilla), sigue visible para no ocultar el dato
+    const usaMonitor = formato => String(formato).toUpperCase() === 'DESKTOP' || !!(e.pantallaModelo || e.pantallaSerie);
+    // El monitor adicional es opcional y se ofrece en DESKTOP y AIO
+    const usaMonitor2 = formato => ['DESKTOP', 'AIO'].includes(String(formato).toUpperCase()) || !!(e.monitor2Marca || e.monitor2Serie);
+    // Obligatorio en DESKTOP; como la serie, un equipo importado sin ese dato se puede editar dejándolo vacío
+    const exigeMonitor = (formato, campo) => String(formato).toUpperCase() === 'DESKTOP' && (isNew || String(eq.formato).toUpperCase() !== 'DESKTOP' || !!eq[campo]);
     openModal({
       title: isNew ? 'Ingresar equipo' : 'Editar equipo ' + e.inventario, size: 'lg',
       submitLabel: isNew ? 'Ingresar equipo' : 'Guardar cambios',
@@ -755,6 +761,11 @@
           <label class="field"><span>Modelo PC</span><input name="modelo" value="${esc(e.modelo)}" list="dl-modelos" autocomplete="off"></label>
           <label class="field"><span>Formato <span class="req">*</span></span><select name="formato">${opt('', isNew ? 'Seleccione…' : '(sin formato)', e.formato)}${formatos.map(t => opt(t, t, e.formato)).join('')}</select></label>
           <label class="field"><span>Número de serie <span class="req">*</span></span><input name="serie" value="${esc(e.serie)}" class="mono"></label>
+          <label class="field" data-monitor><span>Marca Monitor <span class="req">*</span></span><input name="pantallaModelo" value="${esc(e.pantallaModelo)}" list="dl-pantallas" autocomplete="off"><small>Se exporta en la columna PANTALLA MODELO.</small></label>
+          <label class="field" data-monitor><span>Serie Monitor <span class="req">*</span></span><input name="pantallaSerie" value="${esc(e.pantallaSerie)}" class="mono"><small>Se exporta en la columna PANTALLA (N°Serie).</small></label>
+          <h3 class="form-section full" data-monitor2>Monitor adicional <small>(opcional; no se exporta a la planilla)</small></h3>
+          <label class="field" data-monitor2><span>Marca Monitor</span><input name="monitor2Marca" value="${esc(e.monitor2Marca)}" list="dl-pantallas" autocomplete="off"></label>
+          <label class="field" data-monitor2><span>Serie Monitor</span><input name="monitor2Serie" value="${esc(e.monitor2Serie)}" class="mono"></label>
           <div class="field full"><span>Propiedad <span class="req">*</span></span>
             <div class="seg">${['CONAF', 'ARRIENDO', 'OTRA'].map(v => `<label><input type="radio" name="propTipo" value="${v}" ${propTipo === v ? 'checked' : ''}><span>${v === 'OTRA' ? 'Otra' : v}</span></label>`).join('')}</div>
           </div>
@@ -764,8 +775,6 @@
           <label class="field full" id="row-contrato"><span>Contrato de arriendo en el sistema</span>
             <select name="contratoId">${opt('', 'Según el proveedor (automático)', e.contratoId)}${D().contratos.map(c => opt(c.id, `${c.codigo} · ${c.proveedor} (hasta ${fmtDate(c.fechaTermino)})`, e.contratoId)).join('')}</select>
             <small>Opcional: vincula el equipo con un contrato para el control de vencimientos.</small></label>
-          <label class="field"><span>Pantalla modelo</span><input name="pantallaModelo" value="${esc(e.pantallaModelo)}" list="dl-pantallas" autocomplete="off"><small>Solo si el PC usa una pantalla aparte (DESKTOP).</small></label>
-          <label class="field"><span>Pantalla (N° de serie)</span><input name="pantallaSerie" value="${esc(e.pantallaSerie)}" class="mono"></label>
         </div>
         <h3 class="form-section">Datos internos del sistema <small>(no se exportan a la planilla)</small></h3>
         <div class="form-grid">
@@ -783,8 +792,14 @@
           const v = form.elements.propTipo.value;
           $('#row-prop-otra', form).classList.toggle('hidden', v !== 'OTRA');
           $('#row-contrato', form).classList.toggle('hidden', v !== 'ARRIENDO');
+          $$('[data-monitor]', form).forEach(f => {
+            f.classList.toggle('hidden', !usaMonitor(form.elements.formato.value));
+            $('.req', f).classList.toggle('hidden', !exigeMonitor(form.elements.formato.value, $('input', f).name));
+          });
+          $$('[data-monitor2]', form).forEach(f => f.classList.toggle('hidden', !usaMonitor2(form.elements.formato.value)));
         };
         $$('input[name=propTipo]', form).forEach(r => r.addEventListener('change', sync));
+        form.elements.formato.addEventListener('change', sync);
         sync();
         form.elements.contratoId.addEventListener('change', () => {
           const c = contrato(form.elements.contratoId.value);
@@ -802,6 +817,8 @@
         const serieCambia = isNew || norm(fd.serie) !== norm(eq.serie);
         const dupSerie = fd.serie && serieCambia && D().equipos.find(x => x !== eq && norm(x.serie) === norm(fd.serie));
         if (dupSerie) return fieldError(form, 'serie', `Esta serie ya está registrada (${dupSerie.inventario}, ${regionName(dupSerie.region)}).`);
+        if (!fd.pantallaModelo && exigeMonitor(fd.formato, 'pantallaModelo')) return fieldError(form, 'pantallaModelo', 'Ingrese la marca del monitor.');
+        if (!fd.pantallaSerie && exigeMonitor(fd.formato, 'pantallaSerie')) return fieldError(form, 'pantallaSerie', 'Ingrese la serie del monitor.');
         const propiedad = fd.propTipo === 'OTRA' ? fd.propiedadOtra : fd.propTipo;
         if (!propiedad) return fieldError(form, 'propiedadOtra', 'Indique la institución propietaria.');
         const c = fd.propTipo === 'ARRIENDO' ? contrato(fd.contratoId) : null;
@@ -815,7 +832,8 @@
         const data = {
           inventario: fd.inventario, region, oficina: fd.oficina, marca: fd.marca, modelo: fd.modelo, formato: fd.formato,
           serie: fd.serie, propiedad, proveedor, fechaArriendo: parseArriendo(fd.fechaArriendo),
-          pantallaModelo: fd.pantallaModelo, pantallaSerie: fd.pantallaSerie,
+          pantallaModelo: usaMonitor(fd.formato) ? fd.pantallaModelo : '', pantallaSerie: usaMonitor(fd.formato) ? fd.pantallaSerie : '',
+          monitor2Marca: usaMonitor2(fd.formato) ? fd.monitor2Marca : '', monitor2Serie: usaMonitor2(fd.formato) ? fd.monitor2Serie : '',
           contratoId: c ? c.id : '', fechaAlta: fd.fechaAlta, observaciones: fd.observaciones
         };
         if (editarTrabajador) { data.rut = rutValid(fd.rut) ? rutFormat(fd.rut) : fd.rut; data.nombre = fd.nombre; }
@@ -831,7 +849,7 @@
           setTimeout(() => { location.hash = '#/equipo/' + n.id; }, 0);
         } else {
           const changes = [];
-          const labels = { rut: 'RUT', nombre: 'Nombre del trabajador', oficina: 'Oficina', marca: 'Marca PC', modelo: 'Modelo PC', formato: 'Formato', serie: 'N° de serie', propiedad: 'Propiedad', proveedor: 'Proveedor', fechaArriendo: 'Fecha arriendo', pantallaModelo: 'Pantalla modelo', pantallaSerie: 'Pantalla N° serie', contratoId: 'Contrato', inventario: 'N° inventario', fechaAlta: 'Fecha de alta', observaciones: 'Observaciones' };
+          const labels = { rut: 'RUT', nombre: 'Nombre del trabajador', oficina: 'Oficina', marca: 'Marca PC', modelo: 'Modelo PC', formato: 'Formato', serie: 'N° de serie', propiedad: 'Propiedad', proveedor: 'Proveedor', fechaArriendo: 'Fecha arriendo', pantallaModelo: 'Marca monitor', pantallaSerie: 'Serie monitor', monitor2Marca: 'Marca monitor adicional', monitor2Serie: 'Serie monitor adicional', contratoId: 'Contrato', inventario: 'N° inventario', fechaAlta: 'Fecha de alta', observaciones: 'Observaciones' };
           Object.keys(labels).forEach(k => {
             if (k in data && String(eq[k] || '') !== String(data[k] || '')) {
               const show = v => k === 'contratoId' ? ((contrato(v) || {}).codigo || '—') : k === 'fechaArriendo' ? fmtArriendo(v) : (v || '—');
@@ -1073,6 +1091,7 @@
               <div><dt>Fecha de alta</dt><dd>${fmtDate(e.fechaAlta)}</dd></div>
               <div><dt>Última actualización</dt><dd>${fmtDateTime(e.actualizado)}</dd></div>
               <div><dt>Estado</dt><dd>${esc(e.estado)}${e.reparacion ? ' · en servicio técnico' : ''}</dd></div>
+              ${e.monitor2Marca || e.monitor2Serie ? `<div><dt>Monitor adicional: marca</dt><dd>${esc(e.monitor2Marca || '—')}</dd></div><div><dt>Monitor adicional: serie</dt><dd class="mono">${esc(e.monitor2Serie || '—')}</dd></div>` : ''}
               <div style="grid-column:1/-1"><dt>Observaciones</dt><dd>${esc(e.observaciones || '—')}</dd></div>
             </dl></div>
           </section>
