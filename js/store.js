@@ -6,6 +6,7 @@
 'use strict';
 
 const DB_KEY = 'conaf_catastro_v1';
+const DB_VERSION = 2;
 const SESSION_KEY = 'conaf_catastro_session';
 
 const REGIONES = [
@@ -28,10 +29,27 @@ const REGIONES = [
   { code: 'XII',  name: 'Magallanes' }
 ];
 
-// AIO = computador "todo en uno" (pantalla y CPU en un solo equipo)
-const TIPOS = ['Monitor', 'Notebook', 'Impresora', 'Desktop', 'AIO'];
-// Nombres de tipos de versiones anteriores que tienen equivalente directo
-const TIPOS_ANTERIORES = { 'Computador de escritorio': 'Desktop', 'Impresora / Multifuncional': 'Impresora' };
+// Formatos de computador usados en la planilla (columna FORMATO). AIO = "todo en uno".
+const FORMATOS = ['AIO', 'DESKTOP', 'NOTEBOOK', 'SERVER'];
+// Propiedad (columna PROPIEDAD): CONAF, ARRIENDO u otra institución (texto libre)
+const PROPIEDADES = ['CONAF', 'ARRIENDO'];
+// Tipos de la versión 1 y su formato equivalente en la planilla
+const TIPOS_V1 = { 'AIO': 'AIO', 'Desktop': 'DESKTOP', 'Computador de escritorio': 'DESKTOP', 'Notebook': 'NOTEBOOK', 'Monitor': 'MONITOR', 'Impresora': 'IMPRESORA', 'Impresora / Multifuncional': 'IMPRESORA' };
+
+// Textos que el sistema escribe en NOMBRE DEL TRABAJADOR cuando el equipo no está asignado
+const NOMBRE_DISPONIBLE = 'DISPONIBLE';
+const NOMBRE_BAJA = 'BAJA';
+const NOMBRE_REPARACION = 'SERVICIO TÉCNICO';
+
+// Estado del equipo según lo escrito en NOMBRE DEL TRABAJADOR (al importar la planilla)
+function estadoDesdeNombre(nombre) {
+  const n = String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!n) return { estado: 'Disponible' };
+  if (n === 'baja' || /^(dado de )?baja\b/.test(n)) return { estado: 'Baja' };
+  if (/^(servicio tecnico|en reparacion|reparacion)\b/.test(n)) return { estado: 'Disponible', reparacion: true };
+  if (/^(disponi|bodega|stock|reasignar|sin usuario|sin asignar|por asignar|libre)/.test(n)) return { estado: 'Disponible' };
+  return { estado: 'Asignado' };
+}
 
 const UNIDADES = [
   'Dirección Regional',
@@ -71,10 +89,11 @@ function rutValid(r) {
   if (c.length < 2 || !/^\d+$/.test(c.slice(0, -1))) return false;
   return rutDV(c.slice(0, -1)) === c.slice(-1);
 }
+// Formato de la planilla: sin puntos y con guion (12345678-9)
 function rutFormat(r) {
   const c = rutClean(r);
   if (c.length < 2) return String(r || '');
-  return c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '-' + c.slice(-1);
+  return c.slice(0, -1).replace(/^0+(?=\d)/, '') + '-' + c.slice(-1);
 }
 
 /* ---------- SHA-256 (síncrono, para contraseñas de la demo) ---------- */
@@ -164,34 +183,50 @@ const Store = {
     const cuentas = users ? users.slice() : [];
     completarCuentasDemo(cuentas);
     return {
-      version: 1, demo: false, creado: new Date().toISOString(), nextInventario: 10001,
+      version: DB_VERSION, demo: false, creado: new Date().toISOString(), nextInventario: 10001, nextOrden: 1,
       users: cuentas, personas: [], contratos: [], equipos: [], movimientos: [], solicitudes: []
     };
   },
-  // Datos de versiones anteriores: "De baja" pasa a "Baja", "En reparación" deja de ser un estado
-  // y los tipos con equivalente se renombran. En datos reales los demás tipos se conservan tal cual;
-  // en los datos de demostración, los equipos de tipos fuera del catálogo se eliminan.
+  // Datos de versiones anteriores.
+  // Versión 2: cada equipo guarda las 13 columnas de la planilla oficial (RUT, NOMBRE DEL TRABAJADOR,
+  // REGION, OFICINA, MARCA PC, MODELO PC, FORMATO, NUMERO DE SERIE, PROPIEDAD, PROVEEDOR (ARRIENDO),
+  // FECHA ARRIENDO, PANTALLA MODELO y PANTALLA (N°Serie)) más los datos internos del sistema.
   migrate() {
     let changed = false;
-    if (Array.isArray(this.data.users) && completarCuentasDemo(this.data.users)) changed = true;
-    (this.data.equipos || []).forEach(e => {
-      if (TIPOS_ANTERIORES[e.tipo]) { e.tipo = TIPOS_ANTERIORES[e.tipo]; changed = true; }
-      if (e.estado === 'De baja') { e.estado = 'Baja'; changed = true; }
-      else if (e.estado === 'En reparación') {
-        e.estado = 'Disponible';
-        e.reparacion = { desde: e.actualizado || '', falla: e.observaciones || '' };
-        changed = true;
+    const d = this.data;
+    if (Array.isArray(d.users) && completarCuentasDemo(d.users)) changed = true;
+    d.personas = d.personas || []; d.contratos = d.contratos || []; d.movimientos = d.movimientos || [];
+    if ((d.version || 1) < 2) {
+      if (d.demo && typeof Seed !== 'undefined') {
+        // Datos de demostración antiguos: se regeneran con el nuevo formato (se conservan las cuentas)
+        const users = d.users;
+        this.data = Seed.generate();
+        users.forEach(u => { if (!this.data.users.some(x => x.username === u.username)) this.data.users.push(u); else Object.assign(this.data.users.find(x => x.username === u.username), { passHash: u.passHash, active: u.active, name: u.name, email: u.email }); });
+        return true;
       }
-    });
-    if (this.data.demo) {
-      const fuera = new Set((this.data.equipos || []).filter(e => !TIPOS.includes(e.tipo)).map(e => e.id));
-      if (fuera.size) {
-        this.data.equipos = this.data.equipos.filter(e => !fuera.has(e.id));
-        this.data.movimientos = (this.data.movimientos || []).filter(m => !fuera.has(m.equipoId));
-        if (Array.isArray(this.data.solicitudes)) this.data.solicitudes = this.data.solicitudes.filter(s => !fuera.has(s.equipoId));
-        changed = true;
-      }
+      const persona = id => d.personas.find(p => p.id === id);
+      const contrato = id => d.contratos.find(c => c.id === id);
+      d.personas.forEach(p => { if (rutValid(p.rut)) p.rut = rutFormat(p.rut); });
+      d.equipos.forEach((e, i) => {
+        if (e.estado === 'De baja') e.estado = 'Baja';
+        if (e.estado === 'En reparación') { e.estado = 'Disponible'; e.reparacion = { desde: e.actualizado || '', falla: e.observaciones || '' }; }
+        const p = persona(e.personaId), c = contrato(e.contratoId);
+        e.formato = TIPOS_V1[e.tipo] || String(e.tipo || '').toUpperCase();
+        e.propiedad = e.propiedad === 'Arrendado' ? 'ARRIENDO' : e.propiedad === 'Propio' ? 'CONAF' : (e.propiedad || '');
+        e.proveedor = c ? c.proveedor : '';
+        e.fechaArriendo = '';
+        e.oficina = [e.unidad, e.ubicacion].filter(Boolean).join(' · ');
+        e.pantallaModelo = ''; e.pantallaSerie = '';
+        if (e.estado === 'Asignado' && p) { e.nombre = p.nombre; e.rut = p.rut; }
+        else { e.nombre = e.estado === 'Baja' ? NOMBRE_BAJA : e.reparacion ? NOMBRE_REPARACION : NOMBRE_DISPONIBLE; e.rut = ''; }
+        e.orden = i + 1;
+        delete e.tipo; delete e.unidad; delete e.ubicacion;
+      });
+      d.nextOrden = d.equipos.length + 1;
+      d.version = DB_VERSION;
+      changed = true;
     }
+    if (!d.nextOrden) { d.nextOrden = d.equipos.reduce((m, e) => Math.max(m, e.orden || 0), 0) + 1; changed = true; }
     return changed;
   },
   save() {

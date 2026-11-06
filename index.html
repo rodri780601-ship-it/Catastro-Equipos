@@ -16,9 +16,9 @@
     <div class="login-art">
       <div class="login-art-inner">
         <h1>Catastro de Equipos Informáticos</h1>
-        <p>Inventario de equipos propios y arrendados por región: altas, bajas, asignaciones a funcionarios y trazabilidad completa de cada movimiento.</p>
+        <p>Inventario de computadores CONAF y en arriendo por región: altas, bajas, asignaciones a funcionarios y trazabilidad completa de cada movimiento.</p>
         <ul class="login-points">
-          <li>Un registro único por N° de inventario y N° de serie</li>
+          <li>Mismo formato de la planilla Catastro Nacional UIA: resumen y una hoja por región</li>
           <li>Control de contratos de arriendo y vencimientos</li>
           <li>Actas de entrega listas para firmar</li>
         </ul>
@@ -106,8 +106,9 @@
   <div id="modal-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
 
-  <!-- SheetJS para importar/exportar Excel (si no carga, el sistema usa CSV) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Lectura y escritura de Excel propias: funcionan sin conexión y sin librerías externas -->
+  <script src="js/xlsx.js"></script>
+  <script src="js/planilla.js"></script>
   <script src="js/store.js"></script>
   <script src="js/seed.js"></script>
   <script src="js/app.js"></script>

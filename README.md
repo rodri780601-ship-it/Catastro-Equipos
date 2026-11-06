@@ -1,6 +1,6 @@
 # Catastro de Equipos Informáticos · CONAF
 
-Sistema web para administrar el inventario de equipos informáticos propios y arrendados por región, con perfiles de administrador y usuario regional.
+Sistema web para administrar el inventario de computadores de CONAF (propios y en arriendo) por región, con perfiles de administrador y usuario regional. Desde la versión 2.0 cada equipo se registra con las mismas 13 columnas de la planilla **«Catastro Nacional UIA Unificado»**, y la planilla se importa y exporta con el mismo formato.
 
 ## Cómo usarlo
 
@@ -14,7 +14,7 @@ Sistema web para administrar el inventario de equipos informáticos propios y ar
 | `usuario.maule` | `usuario123`| Usuario regional (Región del Maule)     |
 | `usuario.rm`    | `usuario123`| Usuario regional (Región Metropolitana) |
 
-El sistema viene cargado con datos ficticios de ejemplo. Para partir desde la planilla real: **Importar / respaldo → Restablecer** (opcional) y luego **Importar planilla**.
+Para partir desde la planilla real: **Importar / respaldo → Importar planilla**, marque *Reemplazar el catastro actual por esta planilla* y seleccione el archivo `.xlsx`. Para conocer el sistema sin datos reales use **Cargar datos de ejemplo**.
 
 ## Perfiles
 
@@ -31,14 +31,14 @@ El sistema viene cargado con datos ficticios de ejemplo. Para partir desde la pl
 
 ## Funcionalidades
 
-- **Panel**: indicadores (vigentes, asignados, disponibles, en servicio técnico, arrendados, bajas del año), distribución por región o unidad, por tipo, alertas y últimos movimientos.
-- **Equipos**: tres estados (Asignado, Disponible, Baja); un equipo Disponible puede estar además *en servicio técnico* mientras se repara. Búsqueda por inventario, serie, modelo, funcionario o RUT; filtros por región, tipo, propiedad, contrato y estado; ordenamiento; exportación a Excel.
+- **Panel**: indicadores (vigentes, asignados, disponibles, en servicio técnico, en arriendo, bajas del año), distribución por región u oficina, por formato, alertas y últimos movimientos.
+- **Equipos**: tres estados (Asignado, Disponible, Baja); un equipo Disponible puede estar además *en servicio técnico* mientras se repara. Búsqueda por trabajador, RUT, oficina, serie, modelo, proveedor o pantalla; filtros por región, formato, propiedad, contrato y estado; ordenamiento; exportación en el formato de la planilla.
 - **Ciclo de vida**: Alta → Asignación → Devolución / Reasignación → Reparación → Baja (o solicitud de baja). Cada acción queda registrada en el historial con fecha y usuario.
-- **Validaciones**: N° de inventario y N° de serie únicos; RUT con dígito verificador; los equipos arrendados exigen contrato.
+- **Validaciones**: al ingresar un equipo, N° de serie único, formato y marca obligatorios, y proveedor para los equipos en arriendo; RUT de funcionarios con dígito verificador.
 - **Acta de entrega** imprimible (por equipo o con todos los equipos de un funcionario).
 - **Funcionarios**: registro con RUT, cargo, unidad y región; equipos asignados a cada persona; alerta de equipos en manos de funcionarios inactivos.
 - **Contratos de arriendo**: vigencia, días restantes, equipos vigentes y devueltos; alertas de contratos por vencer (90 días) o vencidos con equipos aún en uso.
-- **Importar desde Excel/CSV**: reconoce las columnas por nombre (N° inventario, serie, tipo, marca, modelo, propiedad, contrato, región, unidad, estado, RUT, responsable, fecha de alta…), muestra una vista previa con observaciones y crea los funcionarios faltantes. Hay una plantilla descargable.
+- **Importar planilla**: lee todas las hojas regionales del `.xlsx` (o un `.csv` con los mismos encabezados), muestra una vista previa con observaciones (series repetidas, RUT inválidos, filas sin formato…) y crea los funcionarios con RUT válido. Hay una plantilla vacía descargable.
 - **Respaldo**: exportar/restaurar toda la base en JSON.
 
 ## Estructura
@@ -46,12 +46,30 @@ El sistema viene cargado con datos ficticios de ejemplo. Para partir desde la pl
 ```
 index.html        Página única (login + aplicación)
 css/styles.css    Estilos
-js/store.js       Catálogos (regiones, tipos, unidades), RUT, contraseñas y persistencia
+js/xlsx.js        Lectura y escritura de archivos .xlsx (sin librerías externas)
+js/planilla.js    Formato de la planilla oficial: columnas, hojas, estilos y resumen
+js/store.js       Catálogos (regiones, formatos, unidades), RUT, contraseñas y persistencia
 js/seed.js        Datos ficticios de demostración
 js/app.js         Interfaz y lógica de negocio
 ```
 
-La lectura/escritura de archivos `.xlsx` usa la librería SheetJS desde CDN; si el equipo no tiene internet, el sistema funciona igual e importa/exporta en CSV.
+La lectura y escritura de Excel está integrada (`js/xlsx.js`): funciona sin conexión a internet y no depende de librerías externas. Requiere un navegador actual (Chrome, Edge o Firefox).
+
+## Formato de la planilla
+
+La exportación genera el mismo libro que «AAAA_Catastro_Nacional_UIA_Unificado_DD.MM.AAAA.xlsx»:
+
+- Hoja **RESUMEN** con las fórmulas por hoja (Total equipos, CONAF, ARRIENDO, Otra propiedad, AIO, DESKTOP) y la fila TOTAL.
+- Una hoja por región, en el orden oficial (PC OC, Arica, Tarapaca … Magallanes), con título combinado, encabezados en azul, filtros, panel inmovilizado y los mismos anchos de columna.
+- Columnas: RUT · NOMBRE DEL TRABAJADOR · REGION · OFICINA · MARCA PC · MODELO PC · FORMATO · NUMERO DE SERIE · PROPIEDAD · PROVEEDOR (ARRIENDO) · FECHA ARRIENDO · PANTALLA MODELO · PANTALLA (N°Serie).
+
+Reglas de equivalencia con el sistema:
+
+- El **estado** sale de NOMBRE DEL TRABAJADOR: «BAJA» → Baja; «DISPONIBLE», «BODEGA…», «Stock…», «REASIGNAR…», «sin usuario» o vacío → Disponible; «SERVICIO TÉCNICO» → Disponible en servicio técnico; cualquier nombre → Asignado. Al devolver, reparar o dar de baja un equipo, el sistema escribe ese texto en la columna y deja el RUT en blanco.
+- El **N° de inventario** (CONAF-#####) es interno del sistema y no se exporta.
+- La pantalla de un DESKTOP se registra en PANTALLA MODELO y PANTALLA (N°Serie) del mismo equipo.
+- FECHA ARRIENDO admite una fecha (se exporta como fecha dd-mm-aaaa), un año (como número) o un texto.
+- Los valores se conservan tal como vienen: importar la planilla y volver a exportarla produce el mismo contenido, celda por celda.
 
 ## Importante: alcance de esta versión
 

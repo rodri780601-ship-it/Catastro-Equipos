@@ -24,18 +24,18 @@ const Seed = {
     const cargos = ['Profesional', 'Técnico', 'Administrativo/a', 'Jefe/a de Departamento', 'Guardaparque', 'Encargado/a Provincial', 'Analista', 'Secretario/a', 'Jefe/a de Brigada', 'Director/a Regional'];
     const strip = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+    // Modelos de PC por formato y pantallas para los equipos de escritorio
     const catalogo = {
-      'Monitor': [['Samsung', 'S24R350'], ['LG', '24MK430H'], ['Dell', 'P2422H']],
-      'Notebook': [['Lenovo', 'ThinkPad E14 Gen 5'], ['HP', 'ProBook 440 G10'], ['Dell', 'Latitude 5440']],
-      'Impresora': [['HP', 'LaserJet Pro M404dn'], ['Brother', 'MFC-L6900DW'], ['Epson', 'EcoTank L6270']],
-      'Desktop': [['HP', 'ProDesk 400 G9 SFF'], ['Dell', 'OptiPlex 7010'], ['Lenovo', 'ThinkCentre M70q']],
-      'AIO': [['HP', 'ProOne 440 G9 AIO'], ['Lenovo', 'ThinkCentre neo 50a'], ['Dell', 'OptiPlex 7410 AIO']]
+      'AIO': [['HP', 'ProOne 440 G9'], ['LENOVO', 'ThinkCentre neo 50a'], ['DELL', 'OptiPlex 7410 AIO']],
+      'DESKTOP': [['HP', 'ProDesk 400 G9'], ['DELL', 'OptiPlex 7010'], ['LENOVO', 'ThinkCentre M70s']],
+      'NOTEBOOK': [['LENOVO', 'ThinkPad E14 Gen 5'], ['HP', 'ProBook 440 G10'], ['DELL', 'Latitude 5440']]
     };
+    const pantallas = [['HP', 'P24 G5'], ['DELL', 'P2422H'], ['LG', '24MK430H'], ['SAMSUNG', 'S24R350']];
     const serialFor = marca => ({
-      Lenovo: 'PF' + alnum(6), HP: '5CG' + int(1000, 9999) + alnum(3), Dell: alnum(7),
-      Samsung: 'R' + alnum(10), LG: int(100, 999) + 'NT' + alnum(6), Brother: 'U6' + alnum(8),
-      Epson: 'X' + alnum(9)
+      LENOVO: 'PF' + alnum(6), HP: '5CG' + int(1000, 9999) + alnum(3), DELL: alnum(7),
+      SAMSUNG: 'R' + alnum(10), LG: int(100, 999) + 'NT' + alnum(6)
     }[marca] || alnum(10));
+    const oficinas = ['Dirección Regional', 'Oficina Provincial', 'Unidad de Administración y Finanzas', 'Depto. Protección contra Incendios', 'Depto. Áreas Silvestres Protegidas', 'Depto. Fiscalización', 'Central de Coordinación'];
 
     // Ponderación de equipos por región
     const peso = { OC: 3, RM: 2, VIII: 2, IX: 2, VII: 2, X: 1.5, V: 1.5 };
@@ -45,9 +45,9 @@ const Seed = {
 
     /* ---- Contratos de arriendo (fechas relativas a hoy) ---- */
     const contratos = [
-      { id: 'c1', codigo: 'ARR-2024-014', proveedor: 'Proveedor Demo Computación S.A.', rutProveedor: '111111', descripcion: 'Arriendo de notebooks y computadores de escritorio a nivel nacional', fechaInicio: addDays(today, -580), fechaTermino: addDays(today, 520), contacto: 'mesadeayuda@computacion-demo.example' },
-      { id: 'c2', codigo: 'ARR-2023-007', proveedor: 'Proveedor Demo Impresión Ltda.', rutProveedor: '222222', descripcion: 'Servicio de impresión y multifuncionales con insumos incluidos', fechaInicio: addDays(today, -1050), fechaTermino: addDays(today, 50), contacto: 'soporte@impresion-demo.example' },
-      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'Proveedor Demo Equipos AIO SpA', rutProveedor: '333333', descripcion: 'Arriendo de computadores AIO para oficinas provinciales', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@aio-demo.example' }
+      { id: 'c1', codigo: 'ARR-2024-014', proveedor: 'PROVEEDOR DEMO COMPUTACIÓN', rutProveedor: '111111', descripcion: 'Arriendo de computadores AIO a nivel nacional', fechaInicio: addDays(today, -580), fechaTermino: addDays(today, 520), contacto: 'mesadeayuda@computacion-demo.example' },
+      { id: 'c2', codigo: 'ARR-2023-007', proveedor: 'PROVEEDOR DEMO NOTEBOOKS', rutProveedor: '222222', descripcion: 'Arriendo de notebooks para equipos de terreno', fechaInicio: addDays(today, -1050), fechaTermino: addDays(today, 50), contacto: 'soporte@impresion-demo.example' },
+      { id: 'c3', codigo: 'ARR-2022-021', proveedor: 'PROVEEDOR DEMO EQUIPOS AIO', rutProveedor: '333333', descripcion: 'Arriendo de computadores AIO para oficinas provinciales', fechaInicio: addDays(today, -1490), fechaTermino: addDays(today, -27), contacto: 'contratos@aio-demo.example' }
     ];
     contratos.forEach(c => { c.rutProveedor = rutFormat(c.rutProveedor + rutDV(c.rutProveedor)); });
 
@@ -75,8 +75,9 @@ const Seed = {
     });
 
     /* ---- Equipos y movimientos ---- */
+    // Cada equipo tiene las 13 columnas de la planilla oficial más los datos internos del sistema
     const equipos = [], movimientos = [];
-    let inv = 10001;
+    let inv = 10001, orden = 1;
     const mv = (eq, fecha, tipo, detalle, usuario) => movimientos.push({
       id: 'm' + (movimientos.length + 1), fecha, equipoId: eq.id, inventario: eq.inventario,
       region: eq.region, tipo, detalle, usuario: usuario || 'Carga inicial'
@@ -86,26 +87,31 @@ const Seed = {
       const n = Math.round(7 + (peso[r.code] || 1) * 7 + int(0, 4));
       const gente = personas.filter(p => p.region === r.code);
       for (let i = 0; i < n; i++) {
-        const tipo = rnd() < 0.42 ? 'Notebook' : pick(Object.keys(catalogo));
-        const [marca, modelo] = pick(catalogo[tipo]);
+        const formato = rnd() < 0.55 ? 'AIO' : rnd() < 0.6 ? 'DESKTOP' : 'NOTEBOOK';
+        const [marca, modelo] = pick(catalogo[formato]);
         // ¿Arrendado?
         let contratoId = '';
-        if (['Notebook', 'Desktop'].includes(tipo) && rnd() < 0.45) contratoId = 'c1';
-        else if (tipo === 'Impresora' && rnd() < 0.7) contratoId = 'c2';
-        else if (tipo === 'AIO' && rnd() < 0.75) contratoId = 'c3';
+        if (formato === 'AIO' && rnd() < 0.5) contratoId = rnd() < 0.6 ? 'c1' : 'c3';
+        else if (formato === 'NOTEBOOK' && rnd() < 0.5) contratoId = 'c2';
         const c = contratos.find(x => x.id === contratoId);
         const fechaAlta = c ? dateBetween(c.fechaInicio, addDays(c.fechaInicio, 90)) : dateBetween('2018-03-01', addDays(today, -20));
+        const pant = formato === 'DESKTOP' ? pick(pantallas) : null;
 
         const eq = {
           id: 'e' + inv,
           inventario: 'CONAF-' + inv,
-          serie: serialFor(marca),
-          tipo, marca, modelo,
-          propiedad: c ? 'Arrendado' : 'Propio',
-          contratoId,
+          orden: orden++,
+          rut: '', nombre: 'DISPONIBLE',
           region: r.code,
-          unidad: pick(UNIDADES),
-          ubicacion: pick(['Edificio principal', 'Oficina 2° piso', 'Bodega TI', 'Central de Coordinación', 'Oficina Provincial', 'Sala de reuniones']),
+          oficina: pick(oficinas),
+          marca, modelo, formato,
+          serie: serialFor(marca),
+          propiedad: c ? 'ARRIENDO' : 'CONAF',
+          proveedor: c ? c.proveedor : '',
+          fechaArriendo: c ? (rnd() < 0.6 ? fechaAlta : fechaAlta.slice(0, 4)) : '',
+          pantallaModelo: pant ? pant.join(' ') : '',
+          pantallaSerie: pant ? serialFor(pant[0]) : '',
+          contratoId,
           estado: 'Disponible',
           personaId: '',
           fechaAlta,
@@ -117,13 +123,13 @@ const Seed = {
           actualizado: stamp(fechaAlta)
         };
         inv++;
-        mv(eq, stamp(fechaAlta, 9), 'Alta', `Ingreso al inventario como equipo ${eq.propiedad.toLowerCase()}${c ? ' (contrato ' + c.codigo + ')' : ''}.`);
+        mv(eq, stamp(fechaAlta, 9), 'Alta', `Ingreso al inventario: ${formato} ${marca} ${modelo}, propiedad ${eq.propiedad}${c ? ' (contrato ' + c.codigo + ')' : ''}.`);
 
         const viejo = !c && fechaAlta < '2020-06-01';
         const vencido = c && c.fechaTermino < today;
         const roll = rnd();
         if ((viejo && roll < 0.45) || (!c && roll < 0.05) || (vencido && roll < 0.35)) {
-          eq.estado = 'Baja';
+          eq.estado = 'Baja'; eq.nombre = 'BAJA';
           eq.fechaBaja = vencido ? dateBetween(c.fechaTermino, today) : dateBetween(addDays(fechaAlta, 900), addDays(today, -5));
           if (eq.fechaBaja > today) eq.fechaBaja = addDays(today, -3);
           eq.motivoBaja = vencido ? 'Devolución a proveedor (fin de arriendo)' : pick(['Obsolescencia técnica', 'Obsolescencia técnica', 'Daño irreparable', 'Robo o hurto']);
@@ -132,7 +138,7 @@ const Seed = {
         } else if (roll < 0.8 && gente.length) {
           const p = pick(gente.filter(g => g.activo).length ? gente.filter(g => g.activo) : gente);
           eq.estado = 'Asignado';
-          eq.personaId = p.id;
+          eq.personaId = p.id; eq.nombre = p.nombre; eq.rut = p.rut;
           eq.fechaAsignacion = dateBetween(addDays(fechaAlta, 1), addDays(fechaAlta, 60));
           if (eq.fechaAsignacion > today) eq.fechaAsignacion = today;
           mv(eq, stamp(eq.fechaAsignacion), 'Asignación', `Asignado a ${p.nombre} (${p.rut}).`);
@@ -140,6 +146,7 @@ const Seed = {
           // En servicio técnico: sigue Disponible, con la marca de reparación
           const f = stamp(dateBetween(addDays(today, -60), addDays(today, -2)));
           eq.reparacion = { desde: f, falla: 'Enviado a servicio técnico por falla de hardware.' };
+          eq.nombre = 'SERVICIO TÉCNICO';
           mv(eq, f, 'Reparación', eq.reparacion.falla);
         }
         eq.actualizado = movimientos[movimientos.length - 1].fecha;
@@ -150,7 +157,7 @@ const Seed = {
     /* ---- Solicitudes de baja de los usuarios regionales: pendientes y algunas ya respondidas ---- */
     const solicitudes = [];
     // Equipos propios vigentes de la región, los más antiguos primero
-    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'Propio' && e.region === r)
+    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'CONAF' && e.region === r)
       .sort((a, b) => a.fechaAlta < b.fechaAlta ? -1 : 1);
     const rm = candidatos('RM'), vii = candidatos('VII');
     const solicitar = (e, u, motivo, detalle, f) => {
@@ -171,7 +178,7 @@ const Seed = {
       else {
         const p = personas.find(x => x.id === e.personaId);
         if (p) mv(e, s.resolucion.fecha, 'Devolución', `Devuelto por ${p.nombre} por baja del equipo.`, admin.name);
-        Object.assign(e, { estado: 'Baja', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
+        Object.assign(e, { estado: 'Baja', nombre: 'BAJA', rut: '', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
         mv(e, s.resolucion.fecha, 'Baja', `${s.motivo}. ${comentario} (solicitada por ${s.usuario})`, admin.name);
       }
       e.actualizado = s.resolucion.fecha;
@@ -185,6 +192,6 @@ const Seed = {
     movimientos.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
     movimientos.forEach((m, i) => { m.id = 'm' + (i + 1); });
 
-    return { version: 1, demo: true, creado: new Date().toISOString(), nextInventario: inv, users, personas, contratos, equipos, movimientos, solicitudes };
+    return { version: DB_VERSION, demo: true, creado: new Date().toISOString(), nextInventario: inv, nextOrden: orden, users, personas, contratos, equipos, movimientos, solicitudes };
   }
 };

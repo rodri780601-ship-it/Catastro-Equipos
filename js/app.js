@@ -55,6 +55,40 @@
   const persona = id => D().personas.find(p => p.id === id);
   const contrato = id => D().contratos.find(c => c.id === id);
   const equipo = id => D().equipos.find(e => e.id === id);
+  // Contrato del equipo: el asociado en el sistema o, si no hay, el único cuyo proveedor coincide con PROVEEDOR (ARRIENDO)
+  function contratoDe(e) {
+    if (!e) return null;
+    const c = contrato(e.contratoId);
+    if (c) return c;
+    if (!e.proveedor) return null;
+    const m = D().contratos.filter(x => norm(x.proveedor) === norm(e.proveedor));
+    return m.length === 1 ? m[0] : null;
+  }
+  const esArriendo = e => norm(e.propiedad) === 'arriendo';
+  const regionIdx = Object.fromEntries(REGIONES.map((r, i) => [r.code, i]));
+  // FECHA ARRIENDO puede ser una fecha, un año o un texto (como en la planilla)
+  const fmtArriendo = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? fmtDate(v) : (v || '—');
+  function parseArriendo(v) {
+    v = String(v || '').trim();
+    const m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    return v;
+  }
+  const descEquipo = e => [e.formato, e.marca, e.modelo].filter(Boolean).join(' · ') || 'Equipo';
+  const serieTxt = e => e.serie || 'sin serie';
+  // RUT y NOMBRE DEL TRABAJADOR de la planilla siguen a la asignación del equipo
+  function setResponsable(e, p, etiqueta) {
+    if (p) { e.personaId = p.id; e.nombre = p.nombre; e.rut = p.rut; }
+    else { e.personaId = ''; e.nombre = etiqueta || NOMBRE_DISPONIBLE; e.rut = ''; }
+  }
+  // Responsable a mostrar: el funcionario vinculado o lo escrito en la planilla
+  function responsable(e) {
+    const p = persona(e.personaId);
+    if (p) return { nombre: p.nombre, rut: p.rut, persona: p };
+    if (e.estado === 'Asignado' && (e.nombre || e.rut)) return { nombre: e.nombre || '(sin nombre)', rut: e.rut || '', persona: null };
+    return null;
+  }
 
   let me = null;
   const isAdmin = () => !!me && me.role === 'admin';
@@ -79,7 +113,12 @@
       (e.reparacion ? ` <span class="badge b-warn" title="En reparación desde el ${fmtDate(e.reparacion.desde)}">En servicio técnico</span>` : '') +
       (e.solicitudBaja ? ` <span class="badge b-danger" title="Solicitud de baja pendiente">Baja solicitada</span>` : '');
   }
-  const propBadge = e => e.propiedad === 'Arrendado' ? `<span class="badge b-lease">Arrendado</span>` : `<span class="badge b-own">Propio</span>`;
+  function propBadge(e) {
+    const n = norm(e.propiedad);
+    if (n === 'arriendo') return '<span class="badge b-lease">ARRIENDO</span>';
+    if (n === 'conaf') return '<span class="badge b-own">CONAF</span>';
+    return e.propiedad ? `<span class="badge b-neutral" title="Otra propiedad">${esc(e.propiedad)}</span>` : '<span class="muted">—</span>';
+  }
 
   function contratoStatus(c) {
     const left = daysBetween(todayISO(), c.fechaTermino);
@@ -180,26 +219,37 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1500);
   }
-  function exportRows(rows, filename, sheetName = 'Datos') {
+  // Exporta una tabla simple (funcionarios, movimientos) a Excel con el estilo de la planilla
+  async function exportRows(rows, filename, sheetName = 'Datos') {
     if (!rows.length) return toast('No hay datos para exportar.', 'warn');
-    const stamp = todayISO();
-    if (window.XLSX) {
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const keys = Object.keys(rows[0]);
-      ws['!cols'] = keys.map(k => ({ wch: Math.min(50, Math.max(k.length, ...rows.slice(0, 300).map(r => String(r[k] ?? '').length)) + 2) }));
-      ws['!autofilter'] = { ref: ws['!ref'] };
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-      XLSX.writeFile(wb, `${filename}_${stamp}.xlsx`);
-    } else {
-      const keys = Object.keys(rows[0]);
+    const keys = Object.keys(rows[0]);
+    const sheet = {
+      name: sheetName.slice(0, 31), freezeRows: 1,
+      autoFilter: `A1:${XLSX_LIB.colLetter(keys.length - 1)}${rows.length + 1}`,
+      cols: keys.map(k => Math.min(50, Math.max(k.length, ...rows.slice(0, 300).map(r => String(r[k] ?? '').length)) + 2)),
+      rows: [{ r: 1, ht: 30, cells: keys.map((k, c) => ({ c, v: k, s: 7 })) }]
+        .concat(rows.map((r, i) => ({ r: i + 2, cells: keys.map((k, c) => typeof r[k] === 'number' ? { c, v: r[k], t: 'n', s: 3 } : { c, v: r[k] ?? '', s: 3 }) })))
+    };
+    try {
+      const blob = await XLSX_LIB.write({ title: sheetName, styles: Planilla.STYLES, theme: Planilla.THEME, sheets: [sheet] });
+      downloadBlob(blob, `${filename}_${todayISO()}.xlsx`);
+    } catch (err) {
+      console.error(err);
       const cell = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const csv = [keys.map(cell).join(';')].concat(rows.map(r => keys.map(k => cell(r[k])).join(';'))).join('\r\n');
-      downloadBlob('﻿' + csv, `${filename}_${stamp}.csv`, 'text/csv;charset=utf-8');
+      downloadBlob('\ufeff' + csv, `${filename}_${todayISO()}.csv`, 'text/csv;charset=utf-8');
     }
   }
+  // Planilla oficial: RESUMEN + una hoja por región, idéntica al archivo "Catastro Nacional UIA Unificado"
+  async function descargarPlanilla(list, nombre) {
+    try {
+      const blob = await Planilla.construir(list);
+      downloadBlob(blob, nombre || Planilla.nombreArchivo());
+      toast(`Planilla generada con ${plural(list.length, 'equipo')}.`);
+    } catch (err) { console.error(err); toast('No fue posible generar el archivo Excel en este navegador.', 'error'); }
+  }
   function parseCSV(text) {
-    text = text.replace(/^﻿/, '');
+    text = text.replace(/^\ufeff/, '');
     const firstLine = text.split(/\r?\n/)[0] || '';
     const delim = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ';' : ',';
     const rows = []; let row = [], cur = '', q = false;
@@ -214,29 +264,22 @@
       else cur += ch;
     }
     if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
-    const head = (rows.shift() || []).map(h => h.trim());
-    return rows.filter(r => r.some(c => String(c).trim() !== '')).map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? '').trim()])));
+    return rows.map(r => r.map(c => { const t = String(c).trim(); return t === '' ? undefined : t; }));
   }
+  // Lee .xlsx (todas las hojas) o .csv y devuelve [{ name, rows: [[…]] }]
   function readTableFile(file) {
     return new Promise((resolve, reject) => {
       const fr = new FileReader();
       fr.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-      if (/\.csv$/i.test(file.name) || !window.XLSX) {
-        if (!/\.csv$/i.test(file.name)) return reject(new Error('La librería de Excel no está disponible (sin conexión). Guarde el archivo como CSV e inténtelo de nuevo.'));
-        fr.onload = () => resolve(parseCSV(String(fr.result)));
+      if (/\.csv$/i.test(file.name)) {
+        fr.onload = () => resolve([{ name: file.name.replace(/\.csv$/i, ''), rows: parseCSV(String(fr.result)) }]);
         fr.readAsText(file, 'utf-8');
+      } else if (/\.xls$/i.test(file.name)) {
+        reject(new Error('El formato .xls (Excel 97-2003) no es compatible. Ábralo en Excel y guárdelo como .xlsx.'));
       } else {
-        fr.onload = () => {
-          try {
-            const wb = XLSX.read(fr.result, { type: 'array', cellDates: true });
-            const ws = wb.Sheets[wb.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
-            resolve(rows.map(r => {
-              const o = {};
-              Object.keys(r).forEach(k => { const v = r[k]; o[k] = v instanceof Date ? isoDate(v) : String(v).trim(); });
-              return o;
-            }));
-          } catch (e) { reject(new Error('El archivo no tiene un formato de Excel válido.')); }
+        fr.onload = async () => {
+          try { resolve(await XLSX_LIB.read(fr.result)); }
+          catch (e) { reject(new Error(e && e.message === 'nodecompress' ? 'Este navegador no puede leer archivos .xlsx. Use una versión actual de Chrome, Edge o Firefox, o guarde la planilla como CSV.' : 'El archivo no tiene un formato de Excel (.xlsx) válido.')); }
         };
         fr.readAsArrayBuffer(file);
       }
@@ -259,13 +302,14 @@
      Acta de entrega (impresión)
      ===================================================== */
   function printActa(personaId, equipoIds) {
-    const p = persona(personaId);
     const eqs = equipoIds.map(equipo).filter(Boolean);
+    const r0 = eqs[0] && responsable(eqs[0]);
+    const p = persona(personaId) || (r0 ? { nombre: r0.nombre, rut: r0.rut, region: eqs[0].region, unidad: eqs[0].oficina } : null);
     if (!p || !eqs.length) return toast('No hay equipos asignados para generar el acta.', 'warn');
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana. Permita ventanas emergentes para imprimir el acta.', 'error');
     const folio = 'AE-' + eqs[0].region + '-' + Date.now().toString().slice(-6);
-    const rows = eqs.map((e, i) => `<tr><td>${i + 1}</td><td>${esc(e.inventario)}</td><td>${esc(e.tipo)}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td>${esc(e.serie)}</td><td>${esc(e.propiedad)}${e.propiedad === 'Arrendado' && contrato(e.contratoId) ? '<br><small>' + esc(contrato(e.contratoId).codigo) + '</small>' : ''}</td></tr>`).join('');
+    const rows = eqs.map((e, i) => `<tr><td>${i + 1}</td><td>${esc(e.inventario)}</td><td>${esc(e.formato || '—')}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td>${esc(e.serie || '—')}</td><td>${e.pantallaModelo || e.pantallaSerie ? esc(e.pantallaModelo) + (e.pantallaSerie ? '<br><small>S/N ' + esc(e.pantallaSerie) + '</small>' : '') : '—'}</td><td>${esc(e.propiedad || '—')}${e.proveedor ? '<br><small>' + esc(e.proveedor) + '</small>' : ''}</td></tr>`).join('');
     w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acta de entrega ${esc(folio)}</title>
       <style>
         body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:36px;font-size:13px;line-height:1.45}
@@ -283,17 +327,17 @@
         ol{padding-left:18px}
         @media print{body{margin:14mm}}
       </style></head><body>
-      <div class="head"><div><img src="${new URL('img/logo-gobierno-conaf.svg', location.href).href}" alt="Gobierno de Chile · CONAF"><strong>CORPORACIÓN NACIONAL FORESTAL</strong><br>Región ${esc(regionName(p.region))}</div><div style="text-align:right">Folio: <b>${esc(folio)}</b><br>Fecha: ${esc(fmtDate(todayISO()))}</div></div>
+      <div class="head"><div><img src="${new URL('img/logo-gobierno-conaf.svg', location.href).href}" alt="Gobierno de Chile · CONAF"><strong>CORPORACIÓN NACIONAL FORESTAL</strong><br>${eqs[0].region === 'OC' ? 'Oficina Central' : 'Región ' + esc(regionName(eqs[0].region))}</div><div style="text-align:right">Folio: <b>${esc(folio)}</b><br>Fecha: ${esc(fmtDate(todayISO()))}</div></div>
       <h1>ACTA DE ENTREGA DE EQUIPAMIENTO INFORMÁTICO</h1>
       <div class="sub">Asignación de equipos para el desempeño de funciones institucionales</div>
       <table class="data">
         <tr><td>Funcionario/a</td><td>${esc(p.nombre)}</td></tr>
         <tr><td>RUT</td><td>${esc(p.rut)}</td></tr>
         <tr><td>Cargo</td><td>${esc(p.cargo || '—')}</td></tr>
-        <tr><td>Unidad</td><td>${esc(p.unidad || '—')}</td></tr>
+        <tr><td>Unidad / oficina</td><td>${esc(p.unidad || eqs[0].oficina || '—')}</td></tr>
         <tr><td>Correo</td><td>${esc(p.email || '—')}</td></tr>
       </table>
-      <table><thead><tr><th>#</th><th>N° inventario</th><th>Tipo</th><th>Marca / modelo</th><th>N° serie</th><th>Propiedad</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>#</th><th>N° inventario</th><th>Formato</th><th>Marca / modelo PC</th><th>N° de serie</th><th>Pantalla</th><th>Propiedad</th></tr></thead><tbody>${rows}</tbody></table>
       <p><b>Compromisos del funcionario/a:</b></p>
       <ol>
         <li>Utilizar el equipamiento exclusivamente para fines institucionales.</li>
@@ -352,7 +396,7 @@
     return true;
   }
   function resetViewState() {
-    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', sort: 'inventario', dir: 1, page: 1 });
+    Object.assign(eqState, { q: '', region: '', formato: '', propiedad: '', estado: 'todos', contrato: '', sort: 'orden', dir: 1, page: 1 });
     Object.assign(fuState, { q: '', region: '', activo: 'activos', page: 1 });
     Object.assign(mvState, { q: '', tipo: '', region: '', desde: '', hasta: '', page: 1 });
   }
@@ -441,7 +485,7 @@
     const all = D().equipos.filter(inScope);
     const vig = all.filter(e => e.estado !== 'Baja');
     const count = s => vig.filter(e => e.estado === s).length;
-    const arr = vig.filter(e => e.propiedad === 'Arrendado').length;
+    const arr = vig.filter(esArriendo).length;
     const year = todayISO().slice(0, 4);
     const bajasAno = all.filter(e => e.estado === 'Baja' && (e.fechaBaja || '').startsWith(year)).length;
     const pct = n => vig.length ? Math.round(n / vig.length * 100) : 0;
@@ -450,23 +494,23 @@
       <a class="kpi" href="${href}"><div class="k-label"><span class="dot" style="background:${color}"></span>${label}</div>
       <div class="k-value">${value.toLocaleString('es-CL')}</div><div class="k-foot">${foot}</div></a>`;
 
-    // Distribución (por región para admin, por unidad para usuario)
-    const groupKey = isAdmin() ? 'region' : 'unidad';
+    // Distribución (por región para admin, por oficina para usuario)
+    const groupKey = isAdmin() ? 'region' : 'oficina';
     const groups = {};
-    vig.forEach(e => { const k = e[groupKey] || '—'; (groups[k] = groups[k] || { p: 0, a: 0 }); e.propiedad === 'Arrendado' ? groups[k].a++ : groups[k].p++; });
+    vig.forEach(e => { const k = e[groupKey] || '—'; (groups[k] = groups[k] || { p: 0, a: 0 }); esArriendo(e) ? groups[k].a++ : groups[k].p++; });
     const gList = Object.entries(groups).sort((a, b) => (b[1].p + b[1].a) - (a[1].p + a[1].a));
     const gMax = Math.max(1, ...gList.map(([, v]) => v.p + v.a));
     const barsHTML = gList.map(([k, v]) => {
       const label = isAdmin() ? regionName(k) : k;
       const href = isAdmin() ? `#/equipos?region=${encodeURIComponent(k)}` : '#/equipos';
-      return `<a class="bar-row" href="${href}" style="text-decoration:none;color:inherit" title="${esc(label)}: ${v.p} propios, ${v.a} arrendados">
+      return `<a class="bar-row" href="${href}" style="text-decoration:none;color:inherit" title="${esc(label)}: ${v.p} CONAF u otra propiedad, ${v.a} en arriendo">
         <span class="lbl">${esc(label)}</span>
         <span class="bar-track"><i style="width:${v.p / gMax * 100}%;background:var(--own)"></i><i style="width:${v.a / gMax * 100}%;background:var(--lease)"></i></span>
         <span class="val">${v.p + v.a}</span></a>`;
     }).join('') || '<div class="empty">Sin equipos vigentes.</div>';
 
     const tipos = {};
-    vig.forEach(e => tipos[e.tipo] = (tipos[e.tipo] || 0) + 1);
+    vig.forEach(e => { const k = e.formato || 'Sin formato'; tipos[k] = (tipos[k] || 0) + 1; });
     const tList = Object.entries(tipos).sort((a, b) => b[1] - a[1]);
     const tMax = Math.max(1, ...tList.map(t => t[1]));
     const tiposHTML = tList.map(([t, n]) => `<div class="bar-row"><span class="lbl">${esc(t)}</span><span class="bar-track"><i style="width:${n / tMax * 100}%;background:var(--heading)"></i></span><span class="val">${n}</span></div>`).join('');
@@ -478,7 +522,7 @@
     if (pend.length) alerts.push({ cls: 'danger', icon: 'trash', title: `${plural(pend.length, 'solicitud', 'solicitudes')} de baja pendiente${pend.length === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/solicitudes' });
     D().contratos.forEach(c => {
       const st = contratoStatus(c);
-      const n = vig.filter(e => e.contratoId === c.id).length;
+      const n = vig.filter(e => contratoDe(e) === c).length;
       if (st.left < 0 && n) alerts.push({ cls: 'danger', icon: 'file', title: `Contrato ${c.codigo} vencido con ${plural(n, 'equipo vigente', 'equipos vigentes')}`, text: `${c.proveedor}. Coordine la devolución o renovación.`, href: `#/equipos?contrato=${c.id}` });
       else if (st.left >= 0 && st.left <= 90 && n) alerts.push({ cls: 'warn', icon: 'clock', title: `Contrato ${c.codigo} vence en ${plural(st.left, 'día')}`, text: `${c.proveedor} · ${plural(n, 'equipo')} en ${isAdmin() ? 'el país' : 'su región'}.`, href: `#/equipos?contrato=${c.id}` });
     });
@@ -503,18 +547,18 @@
         ${kpi('Asignados', count('Asignado'), `${pct(count('Asignado'))}% del parque vigente`, 'var(--ok)', '#/equipos?estado=Asignado')}
         ${kpi('Disponibles', count('Disponible'), `${count('Disponible') - rep.length} listos para asignar`, 'var(--info)', '#/equipos?estado=Disponible')}
         ${kpi('En servicio técnico', rep.length, 'Disponibles en reparación', 'var(--warn)', '#/equipos?estado=reparacion')}
-        ${kpi('Arrendados', arr, `${pct(arr)}% · ${vig.length - arr} propios`, 'var(--lease)', '#/equipos?propiedad=Arrendado')}
+        ${kpi('En arriendo', arr, `${pct(arr)}% · ${vig.length - arr} CONAF u otra propiedad`, 'var(--lease)', '#/equipos?propiedad=ARRIENDO')}
         ${kpi('Bajas ' + year, bajasAno, 'Dados de baja este año', 'var(--neutral)', '#/equipos?estado=Baja')}
       </div>
       <div class="grid g-dash">
         <div class="grid">
           <section class="panel">
-            <div class="panel-head"><h3>Equipos vigentes por ${isAdmin() ? 'región' : 'unidad'}</h3>
-              <div class="legend"><span><i style="background:var(--own)"></i>Propios</span><span><i style="background:var(--lease)"></i>Arrendados</span></div></div>
+            <div class="panel-head"><h3>Equipos vigentes por ${isAdmin() ? 'región' : 'oficina'}</h3>
+              <div class="legend"><span><i style="background:var(--own)"></i>CONAF u otra</span><span><i style="background:var(--lease)"></i>Arriendo</span></div></div>
             <div class="panel-body"><div class="bars">${barsHTML}</div></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h3>Equipos vigentes por tipo</h3></div>
+            <div class="panel-head"><h3>Equipos vigentes por formato</h3></div>
             <div class="panel-body"><div class="bars">${tiposHTML || '<div class="empty">Sin datos.</div>'}</div></div>
           </section>
         </div>
@@ -538,25 +582,29 @@
   /* =====================================================
      EQUIPOS — listado
      ===================================================== */
-  const eqState = { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', sort: 'inventario', dir: 1, page: 1 };
+  const eqState = { q: '', region: '', formato: '', propiedad: '', estado: 'todos', contrato: '', sort: 'orden', dir: 1, page: 1 };
 
   function applyQueryToState(param) {
     // Admite #/equipos?estado=X&region=Y desde el panel
     const qs = (location.hash.split('?')[1] || '');
     if (!qs) return;
     const p = new URLSearchParams(qs);
-    Object.assign(eqState, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', page: 1 });
+    Object.assign(eqState, { q: '', region: '', formato: '', propiedad: '', estado: 'todos', contrato: '', page: 1 });
     p.forEach((v, k) => { if (k in eqState) eqState[k] = v; });
     history.replaceState(null, '', '#/equipos');
   }
 
+  const SIN_FORMATO = '__sin';
+  const OTRA_PROPIEDAD = '__otra';
   function filterEquipos() {
     const f = eqState;
     let list = D().equipos.filter(inScope);
     if (f.region) list = list.filter(e => e.region === f.region);
-    if (f.tipo) list = list.filter(e => e.tipo === f.tipo);
-    if (f.propiedad) list = list.filter(e => e.propiedad === f.propiedad);
-    if (f.contrato) list = list.filter(e => e.contratoId === f.contrato);
+    if (f.formato === SIN_FORMATO) list = list.filter(e => !e.formato);
+    else if (f.formato) list = list.filter(e => norm(e.formato) === norm(f.formato));
+    if (f.propiedad === OTRA_PROPIEDAD) list = list.filter(e => !PROPIEDADES.some(x => norm(x) === norm(e.propiedad)));
+    else if (f.propiedad) list = list.filter(e => norm(e.propiedad) === norm(f.propiedad));
+    if (f.contrato) list = list.filter(e => { const c = contratoDe(e); return c && c.id === f.contrato; });
     if (f.estado === 'vigentes') list = list.filter(e => e.estado !== 'Baja');
     else if (f.estado === 'reparacion') list = list.filter(e => e.reparacion);
     else if (f.estado === 'solicitud') list = list.filter(e => e.solicitudBaja);
@@ -565,17 +613,18 @@
     if (f.q) {
       const terms = norm(f.q).split(/\s+/);
       list = list.filter(e => {
-        const p = persona(e.personaId);
-        const hay = norm([e.inventario, e.serie, e.tipo, e.marca, e.modelo, e.unidad, e.ubicacion, p && p.nombre, p && p.rut, p && rutClean(p.rut)].join(' '));
+        const hay = norm([e.inventario, e.rut, rutClean(e.rut), e.nombre, e.oficina, e.marca, e.modelo, e.formato, e.serie, e.propiedad, e.proveedor, e.fechaArriendo, e.pantallaModelo, e.pantallaSerie, regionName(e.region)].join(' '));
         return terms.every(t => hay.includes(t));
       });
     }
+    const ordenPlanilla = (a, b) => (regionIdx[a.region] - regionIdx[b.region]) || ((a.orden || 0) - (b.orden || 0));
     const key = {
-      inventario: e => e.inventario, serie: e => e.serie, tipo: e => e.tipo, marca: e => e.marca + ' ' + e.modelo,
-      propiedad: e => e.propiedad, region: e => regionName(e.region), estado: e => e.estado,
-      persona: e => (persona(e.personaId) || {}).nombre || '~', actualizado: e => e.actualizado || ''
-    }[f.sort] || (e => e.inventario);
-    list.sort((a, b) => key(a).localeCompare(key(b), 'es', { numeric: true }) * f.dir);
+      nombre: e => e.nombre || '~', oficina: e => (isAdmin() ? String(regionIdx[e.region]).padStart(2, '0') + ' ' : '') + (e.oficina || '~'), marca: e => (e.marca || '~') + ' ' + (e.modelo || ''),
+      formato: e => e.formato || '~', serie: e => e.serie || '~', propiedad: e => e.propiedad || '~',
+      estado: e => e.estado, inventario: e => e.inventario, actualizado: e => e.actualizado || ''
+    }[f.sort];
+    if (!key || f.sort === 'orden' || f.sort === 'region') list.sort((a, b) => ordenPlanilla(a, b) * f.dir);
+    else list.sort((a, b) => (key(a).localeCompare(key(b), 'es', { numeric: true }) || ordenPlanilla(a, b)) * f.dir);
     return list;
   }
 
@@ -587,19 +636,22 @@
     // Vistas que se abren desde el Panel: aparecen en la lista solo mientras están activas
     const vistas = { vigentes: 'Vigentes (sin bajas)', reparacion: 'En servicio técnico', solicitud: 'Con solicitud de baja', inactivos: 'Asignados a inactivos' };
     if (vistas[f.estado]) estadoOpts.push([f.estado, vistas[f.estado]]);
+    // Formatos del catálogo y los que vienen de la planilla
+    const enUso = D().equipos.filter(inScope);
+    const formatos = [...new Set([...FORMATOS, ...enUso.map(e => (e.formato || '').toUpperCase()).filter(Boolean)])];
     el.innerHTML = `
       <div class="toolbar">
         <div class="page-actions">
           <button class="btn primary" id="btn-alta">${I('plus')}Ingresar Equipo</button>
-          ${isAdmin() ? `<button class="btn" id="btn-import">${I('upload')}Importar Excel</button>` : ''}
-          <button class="btn" id="btn-export">${I('download')}Exportar</button>
+          ${isAdmin() ? `<button class="btn" id="btn-import">${I('upload')}Importar planilla</button>` : ''}
+          <button class="btn" id="btn-export" title="Descarga los equipos filtrados en el formato de la planilla Catastro Nacional">${I('download')}Exportar planilla</button>
         </div>
       </div>
       <div class="filters">
-        <div class="search">${I('search')}<input type="search" id="f-q" placeholder="Buscar por inventario, serie, modelo, funcionario o RUT…" value="${esc(f.q)}" aria-label="Buscar"></div>
+        <div class="search">${I('search')}<input type="search" id="f-q" placeholder="Buscar por trabajador, RUT, oficina, serie, modelo, proveedor…" value="${esc(f.q)}" aria-label="Buscar"></div>
         ${isAdmin() ? `<select id="f-region" aria-label="Región">${regionOptions(f.region, 'Todas las regiones')}</select>` : ''}
-        <select id="f-tipo" aria-label="Tipo">${opt('', 'Todos los tipos', f.tipo)}${TIPOS.map(t => opt(t, t, f.tipo)).join('')}</select>
-        <select id="f-propiedad" aria-label="Propiedad">${opt('', 'Propios y arrendados', f.propiedad)}${opt('Propio', 'Solo propios', f.propiedad)}${opt('Arrendado', 'Solo arrendados', f.propiedad)}</select>
+        <select id="f-formato" aria-label="Formato">${opt('', 'Todos los formatos', f.formato)}${formatos.map(t => opt(t, t, f.formato)).join('')}${enUso.some(e => !e.formato) ? opt(SIN_FORMATO, 'Sin formato', f.formato) : ''}</select>
+        <select id="f-propiedad" aria-label="Propiedad">${opt('', 'Toda propiedad', f.propiedad)}${opt('CONAF', 'CONAF', f.propiedad)}${opt('ARRIENDO', 'ARRIENDO', f.propiedad)}${opt(OTRA_PROPIEDAD, 'Otra propiedad', f.propiedad)}</select>
         <select id="f-contrato" aria-label="Contrato">${opt('', 'Todos los contratos', f.contrato)}${D().contratos.map(c => opt(c.id, c.codigo + ' · ' + c.proveedor, f.contrato)).join('')}</select>
         <select id="f-estado" aria-label="Estado">${estadoOpts.map(([v, l]) => opt(v, l, f.estado)).join('')}</select>
       </div>
@@ -608,28 +660,18 @@
 
     let t;
     $('#f-q').addEventListener('input', e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value; f.page = 1; drawEquiposTable(); }, 180); });
-    ['region', 'tipo', 'propiedad', 'contrato', 'estado'].forEach(k => {
+    ['region', 'formato', 'propiedad', 'contrato', 'estado'].forEach(k => {
       const s = $('#f-' + k); if (s) s.addEventListener('change', () => { f[k] = s.value; f.page = 1; drawEquiposTable(); });
     });
-    $('#btn-clear').addEventListener('click', () => { Object.assign(f, { q: '', region: '', tipo: '', propiedad: '', estado: 'todos', contrato: '', page: 1 }); renderEquipos(el); });
+    $('#btn-clear').addEventListener('click', () => { Object.assign(f, { q: '', region: '', formato: '', propiedad: '', estado: 'todos', contrato: '', page: 1 }); renderEquipos(el); });
     $('#btn-alta').addEventListener('click', () => equipoForm(null));
-    $('#btn-export').addEventListener('click', () => exportRows(filterEquipos().map(equipoRow), 'catastro_equipos', 'Equipos'));
+    $('#btn-export').addEventListener('click', () => {
+      const list = filterEquipos();
+      if (!list.length) return toast('No hay equipos para exportar.', 'warn');
+      descargarPlanilla(list);
+    });
     if ($('#btn-import')) $('#btn-import').addEventListener('click', importEquiposModal);
     drawEquiposTable();
-  }
-
-  function equipoRow(e) {
-    const p = persona(e.personaId), c = contrato(e.contratoId);
-    return {
-      'N° inventario': e.inventario, 'N° serie': e.serie, 'Tipo': e.tipo, 'Marca': e.marca, 'Modelo': e.modelo,
-      'Propiedad': e.propiedad, 'Contrato': c ? c.codigo : '', 'Proveedor': c ? c.proveedor : '',
-      'Región': regionName(e.region), 'Unidad': e.unidad, 'Ubicación': e.ubicacion, 'Estado': e.estado,
-      'En servicio técnico': e.reparacion ? 'Sí' : '',
-      'Baja solicitada': e.solicitudBaja ? 'Sí' : '',
-      'Responsable': p ? p.nombre : '', 'RUT responsable': p ? p.rut : '', 'Fecha asignación': e.fechaAsignacion ? fmtDate(e.fechaAsignacion) : '',
-      'Fecha alta': fmtDate(e.fechaAlta), 'Fecha baja': e.fechaBaja ? fmtDate(e.fechaBaja) : '', 'Motivo baja': e.motivoBaja || '',
-      'Observaciones': e.observaciones || ''
-    };
   }
 
   function drawEquiposTable() {
@@ -644,22 +686,21 @@
 
     const th = (key, label, cls = '') => `<th class="sortable ${f.sort === key ? 'sorted' : ''} ${cls}" data-sort="${key}">${label}<span class="arrow">${f.sort === key ? (f.dir === 1 ? '▲' : '▼') : '↕'}</span></th>`;
     if (!list.length) {
-      box.innerHTML = `<div class="table-wrap"><div class="empty"><strong>No hay equipos que coincidan</strong>Ajuste los filtros o registre un alta.</div></div>`;
+      box.innerHTML = `<div class="table-wrap"><div class="empty"><strong>No hay equipos que coincidan</strong>Ajuste los filtros o ingrese un equipo.</div></div>`;
       return;
     }
-    box.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr>${th('inventario', 'N° inventario')}${th('serie', 'N° serie', 'hide-sm')}${th('tipo', 'Tipo')}${th('marca', 'Marca / modelo', 'hide-sm')}${th('propiedad', 'Propiedad')}${isAdmin() ? th('region', 'Región', 'hide-sm') : ''}${th('estado', 'Estado')}${th('persona', 'Responsable', 'hide-sm')}<th></th></tr></thead>
+    box.innerHTML = `<div class="table-wrap"><table class="eq-table">
+      <thead><tr>${th('nombre', 'Trabajador')}${th('oficina', isAdmin() ? 'Región / oficina' : 'Oficina', 'hide-sm')}${th('marca', 'Marca / modelo PC', 'hide-sm')}${th('formato', 'Formato')}${th('serie', 'N° de serie')}${th('propiedad', 'Propiedad')}${th('estado', 'Estado')}<th></th></tr></thead>
       <tbody>${pg.rows.map(e => {
-        const p = persona(e.personaId);
+        const asignado = e.estado === 'Asignado';
         return `<tr class="clickable" data-id="${e.id}">
-          <td class="nowrap"><strong class="mono">${esc(e.inventario)}</strong></td>
-          <td class="mono hide-sm">${esc(e.serie)}</td>
-          <td>${esc(e.tipo)}</td>
-          <td class="hide-sm">${esc(e.marca)}<span class="sub">${esc(e.modelo)}</span></td>
-          <td>${propBadge(e)}</td>
-          ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
+          <td class="person">${asignado ? `<span class="name" title="${esc(e.nombre)}">${esc(e.nombre || '(sin nombre)')}</span><span class="sub mono">${esc(e.rut || 'sin RUT')}</span>` : `<span class="muted">${esc(e.nombre || '—')}</span>`}</td>
+          <td class="hide-sm of">${isAdmin() ? `${esc(regionName(e.region))}<span class="sub" title="${esc(e.oficina)}">${esc(e.oficina || '—')}</span>` : esc(e.oficina || '—')}</td>
+          <td class="hide-sm">${esc(e.marca || '—')}<span class="sub">${esc(e.modelo)}</span></td>
+          <td>${e.formato ? esc(e.formato) : '<span class="muted">—</span>'}</td>
+          <td class="nowrap"><span class="mono">${esc(e.serie || '—')}</span><span class="sub mono">${esc(e.inventario)}</span></td>
+          <td>${propBadge(e)}${e.proveedor ? `<span class="sub">${esc(e.proveedor)}</span>` : ''}</td>
           <td class="nowrap">${estadoBadge(e)}</td>
-          <td class="hide-sm person">${p ? `<span class="name" title="${esc(p.nombre)}">${esc(p.nombre)}</span><span class="sub">${esc(p.unidad || '')}</span>` : '<span class="muted">—</span>'}</td>
           <td class="actions">${e.estado === 'Disponible' && !e.reparacion ? `<button class="btn sm" data-assign="${e.id}" title="Asignar">${I('assign')}<span class="hide-sm">Asignar</span></button>` : ''}</td>
         </tr>`;
       }).join('')}</tbody></table></div>${pagerHTML(pg)}`;
@@ -683,76 +724,117 @@
     while (used.has('CONAF-' + n)) n++;
     return 'CONAF-' + n;
   }
+  const nextOrden = () => { const d = D(); if (!d.nextOrden) d.nextOrden = d.equipos.reduce((m, e) => Math.max(m, e.orden || 0), 0) + 1; return d.nextOrden++; };
+  const datalist = (id, values) => `<datalist id="${id}">${[...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')).slice(0, 400).map(m => `<option value="${esc(m)}">`).join('')}</datalist>`;
 
+  // Campos en el mismo orden que las columnas de la planilla
   function equipoForm(eq, onDone) {
     const isNew = !eq;
-    const e = eq || { inventario: nextInventario(), serie: '', tipo: 'Notebook', marca: '', modelo: '', propiedad: 'Propio', contratoId: '', region: isAdmin() ? '' : me.region, unidad: '', ubicacion: '', fechaAlta: todayISO(), observaciones: '' };
-    const marcas = [...new Set(D().equipos.map(x => x.marca))].sort();
-    const modelos = [...new Set(D().equipos.map(x => x.modelo))].sort();
+    const e = eq || { inventario: nextInventario(), rut: '', nombre: NOMBRE_DISPONIBLE, region: isAdmin() ? '' : me.region, oficina: '', marca: '', modelo: '', formato: '', serie: '', propiedad: 'CONAF', proveedor: '', fechaArriendo: '', pantallaModelo: '', pantallaSerie: '', contratoId: '', fechaAlta: todayISO(), observaciones: '' };
+    const todos = D().equipos;
+    const propTipo = norm(e.propiedad) === 'conaf' ? 'CONAF' : norm(e.propiedad) === 'arriendo' ? 'ARRIENDO' : 'OTRA';
+    const formatos = FORMATOS.includes((e.formato || '').toUpperCase()) || !e.formato ? FORMATOS : [...FORMATOS, e.formato];
+    // RUT y nombre se editan a mano solo cuando el equipo figura asignado a alguien sin ficha de funcionario
+    const editarTrabajador = !isNew && e.estado === 'Asignado' && !e.personaId;
     openModal({
       title: isNew ? 'Ingresar equipo' : 'Editar equipo ' + e.inventario, size: 'lg',
       submitLabel: isNew ? 'Ingresar equipo' : 'Guardar cambios',
       body: `
+        <h3 class="form-section">Datos de la planilla</h3>
         <div class="form-grid">
-          <label class="field"><span>N° de inventario <span class="req">*</span></span><input name="inventario" value="${esc(e.inventario)}" class="mono"><small>Sugerido automáticamente; puede modificarlo.</small></label>
-          <label class="field"><span>N° de serie <span class="req">*</span></span><input name="serie" value="${esc(e.serie)}" class="mono"></label>
-          <label class="field"><span>Tipo <span class="req">*</span></span><select name="tipo">${(TIPOS.includes(e.tipo) ? TIPOS : [...TIPOS, e.tipo]).map(t => opt(t, t, e.tipo)).join('')}</select></label>
-          <label class="field"><span>Marca <span class="req">*</span></span><input name="marca" value="${esc(e.marca)}" list="dl-marcas"></label>
-          <label class="field full"><span>Modelo</span><input name="modelo" value="${esc(e.modelo)}" list="dl-modelos"></label>
-          <div class="field full"><span>Propiedad <span class="req">*</span></span>
-            <div class="seg"><label><input type="radio" name="propiedad" value="Propio" ${e.propiedad !== 'Arrendado' ? 'checked' : ''}><span>Propio</span></label><label><input type="radio" name="propiedad" value="Arrendado" ${e.propiedad === 'Arrendado' ? 'checked' : ''}><span>Arrendado</span></label></div>
-          </div>
-          <label class="field full" id="row-contrato"><span>Contrato de arriendo <span class="req">*</span></span>
-            <select name="contratoId">${opt('', 'Seleccione contrato…', e.contratoId)}${D().contratos.map(c => opt(c.id, `${c.codigo} · ${c.proveedor} (hasta ${fmtDate(c.fechaTermino)})`, e.contratoId)).join('')}</select></label>
+          ${editarTrabajador ? `
+          <label class="field"><span>RUT</span><input name="rut" value="${esc(e.rut)}" class="mono" placeholder="12345678-9"></label>
+          <label class="field"><span>Nombre del trabajador</span><input name="nombre" value="${esc(e.nombre)}"></label>
+          <p class="muted full" style="margin:-6px 0 0;font-size:13px">Equipo asignado según la planilla a una persona sin ficha de funcionario. Para vincularlo a un funcionario use <b>Reasignar</b>.</p>`
+          : `<div class="field full"><span>Trabajador</span><div class="readonly">${e.estado === 'Asignado' ? `${esc(e.nombre)} · <span class="mono">${esc(e.rut || 'sin RUT')}</span>` : esc(e.nombre || NOMBRE_DISPONIBLE)}</div><small>RUT y NOMBRE DEL TRABAJADOR se completan al asignar el equipo y se actualizan con la devolución, la reparación o la baja.</small></div>`}
           <label class="field"><span>Región <span class="req">*</span></span>
             <select name="region" ${isAdmin() ? '' : 'disabled'}>${regionOptions(e.region, 'Seleccione región…')}</select>
             ${!isNew && isAdmin() ? '<small>Si cambia la región, se registra como traslado.</small>' : ''}</label>
-          ${unidadField(e.unidad)}
-          <label class="field"><span>Ubicación física</span><input name="ubicacion" value="${esc(e.ubicacion)}" placeholder="Ej.: Oficina 204, Bodega TI"></label>
+          <label class="field"><span>Oficina</span><input name="oficina" value="${esc(e.oficina)}" list="dl-oficinas" placeholder="Ej.: Dirección Regional, Oficina Provincial…" autocomplete="off"></label>
+          <label class="field"><span>Marca PC <span class="req">*</span></span><input name="marca" value="${esc(e.marca)}" list="dl-marcas" autocomplete="off"></label>
+          <label class="field"><span>Modelo PC</span><input name="modelo" value="${esc(e.modelo)}" list="dl-modelos" autocomplete="off"></label>
+          <label class="field"><span>Formato <span class="req">*</span></span><select name="formato">${opt('', isNew ? 'Seleccione…' : '(sin formato)', e.formato)}${formatos.map(t => opt(t, t, e.formato)).join('')}</select></label>
+          <label class="field"><span>Número de serie <span class="req">*</span></span><input name="serie" value="${esc(e.serie)}" class="mono"></label>
+          <div class="field full"><span>Propiedad <span class="req">*</span></span>
+            <div class="seg">${['CONAF', 'ARRIENDO', 'OTRA'].map(v => `<label><input type="radio" name="propTipo" value="${v}" ${propTipo === v ? 'checked' : ''}><span>${v === 'OTRA' ? 'Otra' : v}</span></label>`).join('')}</div>
+          </div>
+          <label class="field full" id="row-prop-otra"><span>Institución propietaria <span class="req">*</span></span><input name="propiedadOtra" value="${propTipo === 'OTRA' ? esc(e.propiedad) : ''}" placeholder="Ej.: CONADI"></label>
+          <label class="field"><span>Proveedor (arriendo)</span><input name="proveedor" value="${esc(e.proveedor)}" list="dl-proveedores" autocomplete="off"></label>
+          <label class="field"><span>Fecha arriendo</span><input name="fechaArriendo" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(e.fechaArriendo || '') ? fmtDate(e.fechaArriendo) : e.fechaArriendo)}" placeholder="dd-mm-aaaa, año o texto"><small>Una fecha (dd-mm-aaaa), un año (2024) o un texto como "Agosto 2023".</small></label>
+          <label class="field full" id="row-contrato"><span>Contrato de arriendo en el sistema</span>
+            <select name="contratoId">${opt('', 'Según el proveedor (automático)', e.contratoId)}${D().contratos.map(c => opt(c.id, `${c.codigo} · ${c.proveedor} (hasta ${fmtDate(c.fechaTermino)})`, e.contratoId)).join('')}</select>
+            <small>Opcional: vincula el equipo con un contrato para el control de vencimientos.</small></label>
+          <label class="field"><span>Pantalla modelo</span><input name="pantallaModelo" value="${esc(e.pantallaModelo)}" list="dl-pantallas" autocomplete="off"><small>Solo si el PC usa una pantalla aparte (DESKTOP).</small></label>
+          <label class="field"><span>Pantalla (N° de serie)</span><input name="pantallaSerie" value="${esc(e.pantallaSerie)}" class="mono"></label>
+        </div>
+        <h3 class="form-section">Datos internos del sistema <small>(no se exportan a la planilla)</small></h3>
+        <div class="form-grid">
+          <label class="field"><span>N° de inventario <span class="req">*</span></span><input name="inventario" value="${esc(e.inventario)}" class="mono"><small>Sugerido automáticamente; puede modificarlo.</small></label>
           <label class="field"><span>Fecha de alta <span class="req">*</span></span><input type="date" name="fechaAlta" value="${esc(e.fechaAlta)}" max="${todayISO()}"></label>
           <label class="field full"><span>Observaciones</span><textarea name="observaciones" rows="2">${esc(e.observaciones)}</textarea></label>
         </div>
-        <datalist id="dl-marcas">${marcas.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
-        <datalist id="dl-modelos">${modelos.map(m => `<option value="${esc(m)}">`).join('')}</datalist>`,
+        ${datalist('dl-oficinas', todos.filter(x => x.region === e.region || !e.region).map(x => x.oficina))}
+        ${datalist('dl-marcas', todos.map(x => x.marca))}
+        ${datalist('dl-modelos', todos.map(x => x.modelo))}
+        ${datalist('dl-pantallas', todos.map(x => x.pantallaModelo))}
+        ${datalist('dl-proveedores', [...D().contratos.map(c => c.proveedor), ...todos.map(x => x.proveedor)])}`,
       onOpen: form => {
-        const sync = () => { $('#row-contrato', form).classList.toggle('hidden', form.elements.propiedad.value !== 'Arrendado'); };
-        $$('input[name=propiedad]', form).forEach(r => r.addEventListener('change', sync));
+        const sync = () => {
+          const v = form.elements.propTipo.value;
+          $('#row-prop-otra', form).classList.toggle('hidden', v !== 'OTRA');
+          $('#row-contrato', form).classList.toggle('hidden', v !== 'ARRIENDO');
+        };
+        $$('input[name=propTipo]', form).forEach(r => r.addEventListener('change', sync));
         sync();
+        form.elements.contratoId.addEventListener('change', () => {
+          const c = contrato(form.elements.contratoId.value);
+          if (c && !form.elements.proveedor.value) form.elements.proveedor.value = c.proveedor;
+        });
       },
       onSubmit: (fd, form) => {
-        const region = isAdmin() ? fd.region : me.region;
+        const region = isAdmin() ? fd.region : (eq ? eq.region : me.region);
         fd.inventario = fd.inventario.toUpperCase();
-        if (!fd.inventario) return fieldError(form, 'inventario', 'Ingrese el número de inventario.');
-        if (D().equipos.some(x => x !== eq && norm(x.inventario) === norm(fd.inventario))) return fieldError(form, 'inventario', 'Ya existe un equipo con este número de inventario.');
+        if (!region) return fieldError(form, 'region', 'Seleccione la región.');
+        if (!fd.marca && (isNew || eq.marca)) return fieldError(form, 'marca', 'Ingrese la marca del PC.');
+        if (!fd.formato && (isNew || eq.formato)) return fieldError(form, 'formato', 'Seleccione el formato.');
         // Obligatoria al ingresar a mano; un equipo importado sin serie se puede editar dejándola vacía
         if (!fd.serie && (isNew || eq.serie)) return fieldError(form, 'serie', 'Ingrese el número de serie.');
-        const dupSerie = fd.serie && D().equipos.find(x => x !== eq && norm(x.serie) === norm(fd.serie));
-        if (dupSerie) return fieldError(form, 'serie', `Esta serie ya está registrada en ${dupSerie.inventario}.`);
-        if (!fd.marca) return fieldError(form, 'marca', 'Ingrese la marca.');
-        if (fd.propiedad === 'Arrendado' && !fd.contratoId) return fieldError(form, 'contratoId', 'Seleccione el contrato de arriendo.');
-        if (!region) return fieldError(form, 'region', 'Seleccione la región.');
+        const serieCambia = isNew || norm(fd.serie) !== norm(eq.serie);
+        const dupSerie = fd.serie && serieCambia && D().equipos.find(x => x !== eq && norm(x.serie) === norm(fd.serie));
+        if (dupSerie) return fieldError(form, 'serie', `Esta serie ya está registrada (${dupSerie.inventario}, ${regionName(dupSerie.region)}).`);
+        const propiedad = fd.propTipo === 'OTRA' ? fd.propiedadOtra : fd.propTipo;
+        if (!propiedad) return fieldError(form, 'propiedadOtra', 'Indique la institución propietaria.');
+        const c = fd.propTipo === 'ARRIENDO' ? contrato(fd.contratoId) : null;
+        const proveedor = fd.proveedor || (c ? c.proveedor : '');
+        if (fd.propTipo === 'ARRIENDO' && !proveedor && (isNew || eq.proveedor)) return fieldError(form, 'proveedor', 'Indique el proveedor del arriendo.');
+        if (!fd.inventario) return fieldError(form, 'inventario', 'Ingrese el número de inventario.');
+        if (D().equipos.some(x => x !== eq && norm(x.inventario) === norm(fd.inventario))) return fieldError(form, 'inventario', 'Ya existe un equipo con este número de inventario.');
         if (!fd.fechaAlta) return fieldError(form, 'fechaAlta', 'Ingrese la fecha de alta.');
+        if (editarTrabajador && fd.rut && !rutValid(fd.rut)) toast('El RUT ingresado no es válido; se guarda tal como está escrito.', 'warn');
 
         const data = {
-          inventario: fd.inventario, serie: fd.serie.toUpperCase(), tipo: fd.tipo, marca: fd.marca, modelo: fd.modelo,
-          propiedad: fd.propiedad, contratoId: fd.propiedad === 'Arrendado' ? fd.contratoId : '',
-          region, unidad: fd.unidad, ubicacion: fd.ubicacion, fechaAlta: fd.fechaAlta, observaciones: fd.observaciones
+          inventario: fd.inventario, region, oficina: fd.oficina, marca: fd.marca, modelo: fd.modelo, formato: fd.formato,
+          serie: fd.serie, propiedad, proveedor, fechaArriendo: parseArriendo(fd.fechaArriendo),
+          pantallaModelo: fd.pantallaModelo, pantallaSerie: fd.pantallaSerie,
+          contratoId: c ? c.id : '', fechaAlta: fd.fechaAlta, observaciones: fd.observaciones
         };
+        if (editarTrabajador) { data.rut = rutValid(fd.rut) ? rutFormat(fd.rut) : fd.rut; data.nombre = fd.nombre; }
+        if (eq && eq.serieNum && data.serie !== eq.serie) data.serieNum = false;
+        if (eq && eq.fechaTxt && data.fechaArriendo !== eq.fechaArriendo) data.fechaTxt = false;
         if (isNew) {
-          const n = Object.assign({ id: Store.uid('e'), estado: 'Disponible', personaId: '', fechaAsignacion: '', fechaBaja: '', motivoBaja: '', detalleBaja: '', solicitudBaja: null }, data);
+          const n = Object.assign({ id: Store.uid('e'), orden: nextOrden(), rut: '', nombre: NOMBRE_DISPONIBLE, estado: 'Disponible', personaId: '', fechaAsignacion: '', fechaBaja: '', motivoBaja: '', detalleBaja: '', solicitudBaja: null, reparacion: null }, data);
           D().equipos.push(n);
           const num = parseInt(String(n.inventario).replace(/\D/g, ''), 10);
           if (/^CONAF-\d+$/.test(n.inventario) && num >= (D().nextInventario || 0)) D().nextInventario = num + 1;
-          const c = contrato(n.contratoId);
-          log(n, 'Alta', `Ingreso al inventario como equipo ${n.propiedad.toLowerCase()}${c ? ' (contrato ' + c.codigo + ')' : ''}. ${n.tipo} ${n.marca} ${n.modelo}, serie ${n.serie}.`);
+          log(n, 'Alta', `Ingreso al inventario: ${descEquipo(n)}, serie ${serieTxt(n)}, propiedad ${n.propiedad}${n.proveedor ? ' (' + n.proveedor + ')' : ''}.`);
           save(); toast(`Equipo ${n.inventario} registrado.`);
           setTimeout(() => { location.hash = '#/equipo/' + n.id; }, 0);
         } else {
           const changes = [];
-          const labels = { inventario: 'N° inventario', serie: 'N° serie', tipo: 'Tipo', marca: 'Marca', modelo: 'Modelo', propiedad: 'Propiedad', contratoId: 'Contrato', unidad: 'Unidad', ubicacion: 'Ubicación', fechaAlta: 'Fecha de alta', observaciones: 'Observaciones' };
+          const labels = { rut: 'RUT', nombre: 'Nombre del trabajador', oficina: 'Oficina', marca: 'Marca PC', modelo: 'Modelo PC', formato: 'Formato', serie: 'N° de serie', propiedad: 'Propiedad', proveedor: 'Proveedor', fechaArriendo: 'Fecha arriendo', pantallaModelo: 'Pantalla modelo', pantallaSerie: 'Pantalla N° serie', contratoId: 'Contrato', inventario: 'N° inventario', fechaAlta: 'Fecha de alta', observaciones: 'Observaciones' };
           Object.keys(labels).forEach(k => {
-            if (String(eq[k] || '') !== String(data[k] || '')) {
-              const show = v => k === 'contratoId' ? ((contrato(v) || {}).codigo || '—') : (v || '—');
+            if (k in data && String(eq[k] || '') !== String(data[k] || '')) {
+              const show = v => k === 'contratoId' ? ((contrato(v) || {}).codigo || '—') : k === 'fechaArriendo' ? fmtArriendo(v) : (v || '—');
               changes.push(`${labels[k]}: ${show(eq[k])} → ${show(data[k])}`);
             }
           });
@@ -760,7 +842,8 @@
           const oldRegion = eq.region;
           Object.assign(eq, data);
           if (traslado) {
-            if (eq.personaId) { eq.personaId = ''; eq.estado = 'Disponible'; eq.fechaAsignacion = ''; }
+            if (eq.estado === 'Asignado') { setResponsable(eq, null, NOMBRE_DISPONIBLE); eq.estado = 'Disponible'; eq.fechaAsignacion = ''; }
+            eq.orden = nextOrden();
             log(eq, 'Traslado', `Traslado de ${regionName(oldRegion)} a ${regionName(data.region)}.`);
           }
           if (changes.length) log(eq, 'Modificación', changes.join('; '));
@@ -773,23 +856,24 @@
 
   /* ---------- Acciones de ciclo de vida ---------- */
   function eqSummary(e) {
-    return `<div class="modal-summary"><span class="avatar" style="border-radius:8px">${I('laptop')}</span><div><strong class="mono">${esc(e.inventario)}</strong><span>${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)} · S/N ${esc(e.serie)}</span></div></div>`;
+    return `<div class="modal-summary"><span class="avatar" style="border-radius:8px">${I('laptop')}</span><div><strong class="mono">${esc(e.serie || e.inventario)}</strong><span>${esc(descEquipo(e))} · ${esc(e.inventario)}${e.oficina ? ' · ' + esc(e.oficina) : ''}</span></div></div>`;
   }
 
   function asignarModal(e, onDone) {
     const gente = D().personas.filter(p => p.activo && p.region === e.region).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-    const actual = persona(e.personaId);
+    const actual = responsable(e);
     openModal({
       title: actual ? 'Reasignar equipo' : 'Asignar equipo', submitLabel: actual ? 'Reasignar' : 'Asignar',
       body: `${eqSummary(e)}
-        ${actual ? `<div class="callout info">${I('assign')}<div>Actualmente asignado a <b>${esc(actual.nombre)}</b>. Se registrará la devolución automáticamente.</div></div>` : ''}
+        ${actual ? `<div class="callout info">${I('assign')}<div>Actualmente asignado a <b>${esc(actual.nombre)}</b>${actual.rut ? ' (' + esc(actual.rut) + ')' : ''}. Se registrará la devolución automáticamente.</div></div>` : ''}
         <label class="field"><span>Funcionario/a responsable <span class="req">*</span></span>
-          <select name="personaId">${opt('', gente.length ? 'Seleccione…' : 'No hay funcionarios activos en la región', '')}${gente.filter(p => p.id !== e.personaId).map(p => opt(p.id, `${p.nombre} · ${p.rut} · ${p.unidad || 'Sin unidad'}`, '')).join('')}</select>
-          <small>Solo se listan funcionarios activos de la Región ${esc(regionName(e.region))}. <a href="#" id="lnk-nueva-persona">Registrar nuevo funcionario</a></small></label>
+          <select name="personaId">${opt('', gente.length ? 'Seleccione…' : 'No hay funcionarios activos en la región', '')}${gente.filter(p => p.id !== e.personaId).map(p => opt(p.id, `${p.nombre} · ${p.rut}${p.unidad ? ' · ' + p.unidad : ''}`, '')).join('')}</select>
+          <small>Solo se listan funcionarios activos de ${e.region === 'OC' ? 'Oficina Central' : 'la Región ' + esc(regionName(e.region))}. <a href="#" id="lnk-nueva-persona">Registrar nuevo funcionario</a></small></label>
         <div class="form-grid">
           <label class="field"><span>Fecha de entrega <span class="req">*</span></span><input type="date" name="fecha" value="${todayISO()}" max="${todayISO()}"></label>
-          <label class="field"><span>Ubicación</span><input name="ubicacion" value="${esc(e.ubicacion || '')}"></label>
+          <label class="field"><span>Oficina</span><input name="oficina" value="${esc(e.oficina || '')}" list="dl-of-asig" autocomplete="off"></label>
         </div>
+        ${datalist('dl-of-asig', D().equipos.filter(x => x.region === e.region).map(x => x.oficina))}
         <label class="field"><span>Observación</span><input name="obs" placeholder="Ej.: entrega con cargador y mochila"></label>
         <label class="check"><input type="checkbox" name="acta" value="1" checked> Generar acta de entrega para firma</label>`,
       onOpen: form => {
@@ -799,10 +883,11 @@
         if (!fd.personaId) return fieldError(form, 'personaId', 'Seleccione al funcionario/a.');
         if (!fd.fecha) return fieldError(form, 'fecha', 'Ingrese la fecha.');
         const p = persona(fd.personaId);
-        if (actual) log(e, 'Devolución', `Devuelto por ${actual.nombre} (${actual.rut}) para reasignación.`);
-        e.personaId = p.id; e.estado = 'Asignado'; e.fechaAsignacion = fd.fecha; e.ubicacion = fd.ubicacion;
+        if (actual) log(e, 'Devolución', `Devuelto por ${actual.nombre}${actual.rut ? ' (' + actual.rut + ')' : ''} para reasignación.`);
+        setResponsable(e, p);
+        e.estado = 'Asignado'; e.fechaAsignacion = fd.fecha; e.oficina = fd.oficina;
         log(e, 'Asignación', `Asignado a ${p.nombre} (${p.rut}) con fecha ${fmtDate(fd.fecha)}.${fd.obs ? ' ' + fd.obs : ''}`);
-        save(); toast(`${e.inventario} asignado a ${p.nombre}.`);
+        save(); toast(`Equipo asignado a ${p.nombre}.`);
         if (fd.acta) printActa(p.id, [e.id]);
         (onDone || route)();
       }
@@ -810,19 +895,21 @@
   }
 
   function devolverModal(e) {
-    const p = persona(e.personaId);
+    const r = responsable(e);
     openModal({
       title: 'Registrar devolución', submitLabel: 'Registrar devolución',
       body: `${eqSummary(e)}
-        <p style="margin:0">Devuelto por <b>${esc(p ? p.nombre : '—')}</b>${p ? ' · ' + esc(p.rut) : ''}</p>
+        <p style="margin:0">Devuelto por <b>${esc(r ? r.nombre : '—')}</b>${r && r.rut ? ' · ' + esc(r.rut) : ''}</p>
         <div class="form-grid">
           <label class="field"><span>Fecha de devolución</span><input type="date" name="fecha" value="${todayISO()}" max="${todayISO()}"></label>
           <label class="field"><span>Estado en que queda</span><select name="condicion">${opt('ok', 'Disponible (en buen estado)')}${opt('reparacion', 'Disponible, requiere reparación')}</select></label>
         </div>
-        <label class="field"><span>Observación</span><textarea name="obs" rows="2" placeholder="Estado del equipo, accesorios recibidos…"></textarea></label>`,
+        <label class="field"><span>Observación</span><textarea name="obs" rows="2" placeholder="Estado del equipo, accesorios recibidos…"></textarea></label>
+        <p class="muted" style="margin:0;font-size:13px">En la planilla, NOMBRE DEL TRABAJADOR quedará como «${NOMBRE_DISPONIBLE}» (o «${NOMBRE_REPARACION}») y el RUT en blanco.</p>`,
       onSubmit: fd => {
-        e.estado = 'Disponible'; e.personaId = ''; e.fechaAsignacion = '';
-        log(e, 'Devolución', `Devuelto por ${p ? p.nombre + ' (' + p.rut + ')' : 'responsable'} el ${fmtDate(fd.fecha)}.${fd.obs ? ' ' + fd.obs : ''}`);
+        e.estado = 'Disponible'; e.fechaAsignacion = '';
+        setResponsable(e, null, fd.condicion === 'reparacion' ? NOMBRE_REPARACION : NOMBRE_DISPONIBLE);
+        log(e, 'Devolución', `Devuelto por ${r ? r.nombre + (r.rut ? ' (' + r.rut + ')' : '') : 'responsable'} el ${fmtDate(fd.fecha)}.${fd.obs ? ' ' + fd.obs : ''}`);
         if (fd.condicion === 'reparacion') {
           e.reparacion = { desde: nowStamp(), falla: fd.obs || 'Requiere reparación tras la devolución.' };
           log(e, 'Reparación', 'Enviado a reparación tras la devolución.');
@@ -833,20 +920,23 @@
   }
 
   function reparacionModal(e, retorno) {
+    const r = responsable(e);
     openModal({
       title: retorno ? 'Retorno de reparación' : 'Enviar a reparación', submitLabel: retorno ? 'Registrar retorno' : 'Enviar a reparación',
       body: `${eqSummary(e)}
-        ${!retorno && e.personaId ? `<div class="callout warn">${I('alert')}<div>El equipo está asignado a <b>${esc((persona(e.personaId) || {}).nombre)}</b>. Al enviarlo a reparación se registrará su devolución.</div></div>` : ''}
+        ${!retorno && r ? `<div class="callout warn">${I('alert')}<div>El equipo está asignado a <b>${esc(r.nombre)}</b>. Al enviarlo a reparación se registrará su devolución.</div></div>` : ''}
         <label class="field"><span>${retorno ? 'Resultado de la reparación' : 'Falla reportada / servicio técnico'} <span class="req">*</span></span><textarea name="obs" rows="3"></textarea></label>`,
       onSubmit: (fd, form) => {
         if (!fd.obs) return fieldError(form, 'obs', 'Describa brevemente.');
         // La reparación no cambia el estado: el equipo queda Disponible y marcado en servicio técnico
         if (retorno) {
           e.reparacion = null;
+          if (e.estado !== 'Asignado') setResponsable(e, null, NOMBRE_DISPONIBLE);
           log(e, 'Retorno de reparación', fd.obs);
         } else {
-          if (e.personaId) { const p = persona(e.personaId); log(e, 'Devolución', `Devuelto por ${p ? p.nombre : 'responsable'} para reparación.`); }
-          e.personaId = ''; e.fechaAsignacion = ''; e.estado = 'Disponible';
+          if (r) log(e, 'Devolución', `Devuelto por ${r.nombre} para reparación.`);
+          setResponsable(e, null, NOMBRE_REPARACION);
+          e.fechaAsignacion = ''; e.estado = 'Disponible';
           e.reparacion = { desde: nowStamp(), falla: fd.obs };
           log(e, 'Reparación', fd.obs);
         }
@@ -862,10 +952,10 @@
       title: direct ? (sol ? 'Aprobar baja' : 'Dar de baja') : 'Solicitar baja',
       submitLabel: direct ? 'Confirmar baja' : 'Enviar solicitud', submitClass: 'danger',
       body: `${eqSummary(e)}
-        ${direct ? `<div class="callout danger">${I('alert')}<div>El equipo dejará de estar vigente en el catastro. ${e.personaId ? 'Se registrará además su devolución.' : ''}</div></div>`
+        ${direct ? `<div class="callout danger">${I('alert')}<div>El equipo dejará de estar vigente en el catastro y en la planilla figurará como «${NOMBRE_BAJA}». ${responsable(e) ? 'Se registrará además su devolución.' : ''}</div></div>`
           : `<div class="callout info">${I('shield')}<div>La baja será revisada por un administrador. Mientras tanto el equipo sigue vigente.</div></div>`}
         <div class="form-grid">
-          <label class="field"><span>Motivo <span class="req">*</span></span><select name="motivo">${opt('', 'Seleccione…', '')}${MOTIVOS_BAJA.map(m => opt(m, m, sol ? sol.motivo : (e.propiedad === 'Arrendado' ? 'Devolución a proveedor (fin de arriendo)' : ''))).join('')}</select></label>
+          <label class="field"><span>Motivo <span class="req">*</span></span><select name="motivo">${opt('', 'Seleccione…', '')}${MOTIVOS_BAJA.map(m => opt(m, m, sol ? sol.motivo : (esArriendo(e) ? 'Devolución a proveedor (fin de arriendo)' : ''))).join('')}</select></label>
           ${direct ? `<label class="field"><span>Fecha de baja <span class="req">*</span></span><input type="date" name="fecha" value="${todayISO()}" max="${todayISO()}"></label>` : '<div></div>'}
           <label class="field full"><span>Detalle / respaldo ${direct ? '(N° resolución, acta, informe técnico)' : ''}</span><textarea name="detalle" rows="3">${esc(sol ? sol.detalle : '')}</textarea></label>
         </div>`,
@@ -873,11 +963,13 @@
         if (!fd.motivo) return fieldError(form, 'motivo', 'Seleccione el motivo.');
         if (direct) {
           if (!fd.fecha) return fieldError(form, 'fecha', 'Ingrese la fecha de baja.');
-          if (e.personaId) { const p = persona(e.personaId); log(e, 'Devolución', `Devuelto por ${p ? p.nombre : 'responsable'} por baja del equipo.`); }
+          const r = responsable(e);
+          if (r) log(e, 'Devolución', `Devuelto por ${r.nombre} por baja del equipo.`);
           if (sol) resolverSolicitud(e, 'Aprobada', `Baja registrada con fecha ${fmtDate(fd.fecha)}.${fd.detalle ? ' ' + fd.detalle : ''}`);
-          Object.assign(e, { estado: 'Baja', personaId: '', fechaAsignacion: '', fechaBaja: fd.fecha, motivoBaja: fd.motivo, detalleBaja: fd.detalle, solicitudBaja: null, reparacion: null });
+          setResponsable(e, null, NOMBRE_BAJA);
+          Object.assign(e, { estado: 'Baja', fechaAsignacion: '', fechaBaja: fd.fecha, motivoBaja: fd.motivo, detalleBaja: fd.detalle, solicitudBaja: null, reparacion: null });
           log(e, 'Baja', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}${sol ? ` (solicitada por ${sol.usuario})` : ''}`);
-          toast(`${e.inventario} dado de baja.`);
+          toast(`Equipo ${e.serie || e.inventario} dado de baja.`);
         } else {
           registrarSolicitud(e, { motivo: fd.motivo, detalle: fd.detalle, fecha: nowStamp(), usuario: me.name, usuarioId: me.id });
           log(e, 'Solicitud de baja', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}`);
@@ -911,8 +1003,8 @@
       el.innerHTML = `<a class="back" href="#/equipos">${I('left')}Volver a equipos</a><div class="panel"><div class="empty"><strong>Equipo no encontrado</strong>No existe o no pertenece a su región.</div></div>`;
       return;
     }
-    setTitle('Ficha de equipo', e.inventario);
-    const p = persona(e.personaId), c = contrato(e.contratoId);
+    setTitle('Ficha de equipo', e.serie || e.inventario);
+    const r = responsable(e), p = r && r.persona, c = contratoDe(e);
     const baja = e.estado === 'Baja';
     const btn = (act, icon, label, cls = '') => `<button class="btn ${cls}" data-act="${act}">${I(icon)}${label}</button>`;
     const acts = [];
@@ -923,7 +1015,7 @@
       else acts.push(btn('reparar', 'wrench', 'Enviar a reparación'));
       acts.push(btn('editar', 'edit', 'Editar'));
       if (!e.solicitudBaja) acts.push(btn('baja', 'trash', isAdmin() ? 'Dar de baja' : 'Solicitar baja'));
-    } else if (isAdmin()) acts.push(btn('reactivar', 'refresh', 'Revertir baja'));
+    } else if (isAdmin()) acts.push(btn('editar', 'edit', 'Editar'), btn('reactivar', 'refresh', 'Revertir baja'));
 
     let callout = '';
     if (e.solicitudBaja) {
@@ -931,23 +1023,39 @@
       callout = `<div class="callout danger" style="margin-bottom:16px">${I('alert')}<div class="grow"><b>Baja solicitada</b> por ${esc(s.usuario)} el ${fmtDateTime(s.fecha)} · ${esc(s.motivo)}${s.detalle ? '<br>' + esc(s.detalle) : ''}</div>
         ${isAdmin() ? `<div class="page-actions"><button class="btn sm danger" data-act="aprobar">Aprobar baja</button><button class="btn sm" data-act="rechazar">Rechazar</button></div>` : `<button class="btn sm" data-act="cancelar-sol">Retirar solicitud</button>`}</div>`;
     } else if (baja) {
-      callout = `<div class="callout" style="background:var(--neutral-bg);margin-bottom:16px">${I('trash')}<div><b>Dado de baja</b> el ${fmtDate(e.fechaBaja)} · ${esc(e.motivoBaja)}${e.detalleBaja ? '<br>' + esc(e.detalleBaja) : ''}</div></div>`;
+      callout = `<div class="callout" style="background:var(--neutral-bg);margin-bottom:16px">${I('trash')}<div><b>Dado de baja</b>${e.fechaBaja ? ' el ' + fmtDate(e.fechaBaja) : ''}${e.motivoBaja ? ' · ' + esc(e.motivoBaja) : ''}${e.detalleBaja ? '<br>' + esc(e.detalleBaja) : ''}</div></div>`;
     } else if (e.reparacion) {
-      callout = `<div class="callout warn" style="margin-bottom:16px">${I('wrench')}<div><b>En servicio técnico</b> desde el ${fmtDate(e.reparacion.desde)}${e.reparacion.falla ? ' · ' + esc(e.reparacion.falla) : ''}<br>No se puede asignar hasta registrar el retorno de reparación.</div></div>`;
+      callout = `<div class="callout warn" style="margin-bottom:16px">${I('wrench')}<div><b>En servicio técnico</b>${e.reparacion.desde ? ' desde el ' + fmtDate(e.reparacion.desde) : ''}${e.reparacion.falla ? ' · ' + esc(e.reparacion.falla) : ''}<br>No se puede asignar hasta registrar el retorno de reparación.</div></div>`;
     } else if (c && contratoStatus(c).left < 0) {
       callout = `<div class="callout danger" style="margin-bottom:16px">${I('clock')}<div>El contrato de arriendo <b>${esc(c.codigo)}</b> venció el ${fmtDate(c.fechaTermino)}. Coordine la devolución al proveedor o la renovación.</div></div>`;
     } else if (p && !p.activo) {
       callout = `<div class="callout warn" style="margin-bottom:16px">${I('users')}<div>El responsable <b>${esc(p.nombre)}</b> está inactivo. Gestione la devolución del equipo.</div></div>`;
     }
 
+    // Las 13 columnas de la planilla, en su orden
+    const planilla = [
+      ['RUT', `<span class="mono">${esc(e.rut || '—')}</span>${e.rut && !rutValid(e.rut) ? ' <span class="badge b-warn" title="El dígito verificador no corresponde">RUT no válido</span>' : ''}`],
+      ['Nombre del trabajador', esc(e.nombre || '—')],
+      ['Región', esc(Planilla.HOJAS[e.region] ? Planilla.HOJAS[e.region].nombre : regionName(e.region))],
+      ['Oficina', esc(e.oficina || '—')],
+      ['Marca PC', esc(e.marca || '—')],
+      ['Modelo PC', esc(e.modelo || '—')],
+      ['Formato', esc(e.formato || '—')],
+      ['Número de serie', `<span class="mono">${esc(e.serie || '—')}</span>`],
+      ['Propiedad', esc(e.propiedad || '—')],
+      ['Proveedor (arriendo)', esc(e.proveedor || '—')],
+      ['Fecha arriendo', esc(fmtArriendo(e.fechaArriendo))],
+      ['Pantalla modelo', esc(e.pantallaModelo || '—')],
+      ['Pantalla (N° serie)', `<span class="mono">${esc(e.pantallaSerie || '—')}</span>`]
+    ];
     const hist = D().movimientos.filter(m => m.equipoId === e.id).slice().reverse();
     el.innerHTML = `
       <a class="back" href="#/equipos">${I('left')}Volver a equipos</a>
       <div class="detail-head">
         <div>
-          <div class="eyebrow">${esc(e.tipo)}</div>
-          <h2 class="mono" style="font-size:24px">${esc(e.inventario)}</h2>
-          <div class="tags">${estadoBadge(e)} ${propBadge(e)} <span class="badge b-neutral">Región ${esc(regionName(e.region))}</span></div>
+          <div class="eyebrow">${esc(descEquipo(e))}</div>
+          <h2 class="mono" style="font-size:24px">${esc(e.serie || 'Sin N° de serie')}</h2>
+          <div class="tags">${estadoBadge(e)} ${propBadge(e)} <span class="badge b-neutral">${e.region === 'OC' ? 'Oficina Central' : 'Región ' + esc(regionName(e.region))}</span> <span class="badge b-neutral mono" title="N° de inventario interno">${esc(e.inventario)}</span></div>
         </div>
         <div class="page-actions">${acts.join('')}</div>
       </div>
@@ -955,35 +1063,38 @@
       <div class="grid g-dash">
         <div class="grid" style="align-content:start">
           <section class="panel">
-            <div class="panel-head"><h3>Datos del equipo</h3></div>
+            <div class="panel-head"><h3>Datos de la planilla</h3><span class="muted" style="font-size:13px">Hoja «${esc(Planilla.HOJAS[e.region] ? Planilla.HOJAS[e.region].hoja : '')}»</span></div>
+            <div class="panel-body"><dl class="dl">${planilla.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h3>Datos internos</h3></div>
             <div class="panel-body"><dl class="dl">
               <div><dt>N° de inventario</dt><dd class="mono">${esc(e.inventario)}</dd></div>
-              <div><dt>N° de serie</dt><dd class="mono">${esc(e.serie)}</dd></div>
-              <div><dt>Marca</dt><dd>${esc(e.marca)}</dd></div>
-              <div><dt>Modelo</dt><dd>${esc(e.modelo || '—')}</dd></div>
-              <div><dt>Unidad</dt><dd>${esc(e.unidad || '—')}</dd></div>
-              <div><dt>Ubicación</dt><dd>${esc(e.ubicacion || '—')}</dd></div>
               <div><dt>Fecha de alta</dt><dd>${fmtDate(e.fechaAlta)}</dd></div>
               <div><dt>Última actualización</dt><dd>${fmtDateTime(e.actualizado)}</dd></div>
+              <div><dt>Estado</dt><dd>${esc(e.estado)}${e.reparacion ? ' · en servicio técnico' : ''}</dd></div>
               <div style="grid-column:1/-1"><dt>Observaciones</dt><dd>${esc(e.observaciones || '—')}</dd></div>
             </dl></div>
           </section>
-          ${e.propiedad === 'Arrendado' ? `<section class="panel">
+          ${esArriendo(e) ? `<section class="panel">
             <div class="panel-head"><h3>Contrato de arriendo</h3>${c ? `<span class="badge ${contratoStatus(c).cls}">${contratoStatus(c).label}</span>` : ''}</div>
             <div class="panel-body">${c ? `<dl class="dl">
               <div><dt>Código</dt><dd class="mono">${esc(c.codigo)}</dd></div>
               <div><dt>Proveedor</dt><dd>${esc(c.proveedor)}</dd></div>
               <div><dt>Inicio</dt><dd>${fmtDate(c.fechaInicio)}</dd></div>
               <div><dt>Término</dt><dd>${fmtDate(c.fechaTermino)}</dd></div>
-              <div style="grid-column:1/-1"><dt>Contacto soporte</dt><dd>${esc(c.contacto || '—')}</dd></div></dl>` : '<span class="muted">Sin contrato asociado.</span>'}</div>
+              <div style="grid-column:1/-1"><dt>Contacto soporte</dt><dd>${esc(c.contacto || '—')}</dd></div></dl>`
+              : `<span class="muted">${e.proveedor ? `No hay un contrato registrado para el proveedor «${esc(e.proveedor)}».` : 'Sin proveedor ni contrato asociado.'}${isAdmin() ? ' Puede registrarlo en Contratos.' : ''}</span>`}</div>
           </section>` : ''}
         </div>
         <div class="grid" style="align-content:start">
           <section class="panel">
             <div class="panel-head"><h3>Responsable</h3></div>
-            <div class="panel-body">${p ? `<div class="holder"><span class="avatar">${initials(p.nombre)}</span><div><strong>${esc(p.nombre)}</strong>${p.activo ? '' : ' <span class="badge b-warn">Inactivo</span>'}<div class="muted" style="font-size:13.5px">${esc(p.rut)} · ${esc(p.cargo || '')}</div><div class="muted" style="font-size:13.5px">${esc(p.unidad || '')}</div><div style="font-size:13.5px">${esc(p.email || '')}</div></div></div>
-              <p class="muted" style="margin:12px 0 0;font-size:13.5px">Asignado desde el ${fmtDate(e.fechaAsignacion)}</p>`
-              : `<span class="muted">${baja ? 'Equipo dado de baja.' : 'Sin asignar.'}</span>`}</div>
+            <div class="panel-body">${p ? `<div class="holder"><span class="avatar">${initials(p.nombre)}</span><div><strong>${esc(p.nombre)}</strong>${p.activo ? '' : ' <span class="badge b-warn">Inactivo</span>'}<div class="muted" style="font-size:13.5px">${esc(p.rut)}${p.cargo ? ' · ' + esc(p.cargo) : ''}</div><div class="muted" style="font-size:13.5px">${esc(p.unidad || '')}</div><div style="font-size:13.5px">${esc(p.email || '')}</div></div></div>
+              ${e.fechaAsignacion ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">Asignado desde el ${fmtDate(e.fechaAsignacion)}</p>` : ''}`
+              : r ? `<div class="holder"><span class="avatar">${initials(r.nombre)}</span><div><strong>${esc(r.nombre)}</strong><div class="muted mono" style="font-size:13.5px">${esc(r.rut || 'sin RUT')}</div></div></div>
+              <p class="muted" style="margin:12px 0 0;font-size:13.5px">Asignado según la planilla, sin ficha de funcionario${r.rut && !rutValid(r.rut) ? ' (el RUT no es válido)' : ''}.</p>`
+              : `<span class="muted">${baja ? 'Equipo dado de baja.' : e.reparacion ? 'En servicio técnico.' : 'Sin asignar.'}</span>`}</div>
           </section>
           <section class="panel">
             <div class="panel-head"><h3>Historial</h3><span class="muted" style="font-size:13px">${plural(hist.length, 'registro')}</span></div>
@@ -997,7 +1108,7 @@
       reparar: () => reparacionModal(e, false), retorno: () => reparacionModal(e, true), editar: () => equipoForm(e),
       baja: () => bajaModal(e), aprobar: () => bajaModal(e), rechazar: () => rechazarBajaModal(e),
       'cancelar-sol': () => retirarSolicitud(e),
-      reactivar: () => confirmDialog({ title: 'Revertir baja', message: `El equipo <b>${esc(e.inventario)}</b> volverá a estar vigente con estado <b>Disponible</b>.`, confirmLabel: 'Revertir baja', onConfirm: () => { Object.assign(e, { estado: 'Disponible', fechaBaja: '', motivoBaja: '', detalleBaja: '' }); log(e, 'Reactivación', 'Se revierte la baja del equipo.'); save(); toast('Baja revertida.'); route(); } })
+      reactivar: () => confirmDialog({ title: 'Revertir baja', message: `El equipo <b>${esc(e.serie || e.inventario)}</b> volverá a estar vigente con estado <b>Disponible</b> («${NOMBRE_DISPONIBLE}» en la planilla).`, confirmLabel: 'Revertir baja', onConfirm: () => { Object.assign(e, { estado: 'Disponible', fechaBaja: '', motivoBaja: '', detalleBaja: '' }); setResponsable(e, null, NOMBRE_DISPONIBLE); log(e, 'Reactivación', 'Se revierte la baja del equipo.'); save(); toast('Baja revertida.'); route(); } })
     };
     $$('[data-act]', el).forEach(b => b.addEventListener('click', () => handlers[b.dataset.act] && handlers[b.dataset.act]()));
   }
@@ -1080,7 +1191,7 @@
           const dias = daysBetween(s.fecha.slice(0, 10), todayISO());
           return `<tr class="clickable" data-id="${e.id}">
             <td><span class="badge b-danger">${esc(s.tipo)}</span></td>
-            <td class="nowrap"><strong class="mono">${esc(e.inventario)}</strong><span class="sub">${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)}</span></td>
+            <td class="nowrap"><strong class="mono">${esc(e.serie || e.inventario)}</strong><span class="sub">${esc(descEquipo(e))}</span></td>
             ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
             <td>${esc(s.motivo)}${s.detalle ? `<span class="sub" title="${esc(s.detalle)}">${esc(s.detalle)}</span>` : ''}</td>
             <td class="hide-sm nowrap">${fmtDateTime(s.fecha)} · ${haceDias(s.fecha)}<span class="sub">${esc(s.usuario)}</span></td>
@@ -1112,7 +1223,7 @@
         ? `<div class="callout ${s.estado === 'Aprobada' ? 'info' : 'danger'}">${I(s.estado === 'Aprobada' ? 'check' : 'alert')}<div><b>Respuesta del administrador:</b> ${esc(r.comentario)}</div></div>` : '';
       return `<article class="panel req-card${nuevas.has(s.id) ? ' is-new' : ''}">
         <div class="req-head">
-          <div><span class="badge b-danger">${esc(s.tipo)}</span> <a class="mono" href="#/equipo/${esc(s.equipoId)}"><strong>${esc(s.inventario)}</strong></a>${e ? ` <span class="muted">${esc(e.tipo)} · ${esc(e.marca)} ${esc(e.modelo)}</span>` : ''}</div>
+          <div><span class="badge b-danger">${esc(s.tipo)}</span> <a class="mono" href="#/equipo/${esc(s.equipoId)}"><strong>${esc(s.inventario)}</strong></a>${e ? ` <span class="muted">${esc(descEquipo(e))}${e.serie ? ' · S/N ' + esc(e.serie) : ''}</span>` : ''}</div>
           <div>${nuevas.has(s.id) ? '<span class="badge b-info">Respuesta nueva</span> ' : ''}${solEstadoBadge(s)}</div>
         </div>
         <p class="req-motivo"><b>${esc(s.motivo)}</b>${s.detalle ? ' · ' + esc(s.detalle) : ''}</p>
@@ -1201,7 +1312,7 @@
 
   // Unidad / departamento: lista del catálogo y de las unidades ya escritas a mano, o texto libre
   function unidadField(value) {
-    const propias = [...D().equipos, ...D().personas].map(x => x.unidad).filter(u => u && !UNIDADES.includes(u));
+    const propias = D().personas.map(x => x.unidad).filter(u => u && !UNIDADES.includes(u));
     const unidades = [...UNIDADES, ...[...new Set(propias)].sort((a, b) => a.localeCompare(b, 'es'))];
     return `<label class="field"><span>Unidad / departamento</span><input name="unidad" value="${esc(value || '')}" list="dl-unidades" placeholder="Elija de la lista o escriba" autocomplete="off"></label>
       <datalist id="dl-unidades">${unidades.map(u => `<option value="${esc(u)}">`).join('')}</datalist>`;
@@ -1213,7 +1324,7 @@
     openModal({
       title: isNew ? 'Nuevo funcionario' : 'Editar funcionario',
       body: `<div class="form-grid">
-        <label class="field"><span>RUT <span class="req">*</span></span><input name="rut" value="${esc(x.rut)}" placeholder="12.345.678-9" class="mono"></label>
+        <label class="field"><span>RUT <span class="req">*</span></span><input name="rut" value="${esc(x.rut)}" placeholder="12345678-9" class="mono"></label>
         <label class="field"><span>Nombre completo <span class="req">*</span></span><input name="nombre" value="${esc(x.nombre)}"></label>
         <label class="field"><span>Cargo</span><input name="cargo" value="${esc(x.cargo)}"></label>
         ${unidadField(x.unidad)}
@@ -1236,6 +1347,8 @@
           const asignados = D().equipos.filter(e => e.personaId === p.id && e.estado === 'Asignado');
           if (p.region !== reg && asignados.length) return fieldError(form, 'region', `Tiene ${plural(asignados.length, 'equipo')} asignado${asignados.length === 1 ? '' : 's'} en ${regionName(p.region)}. Regístrelos como devueltos antes de cambiar la región.`);
           Object.assign(p, data); toast('Cambios guardados.');
+          // RUT y NOMBRE DEL TRABAJADOR de sus equipos siguen la ficha del funcionario
+          asignados.forEach(e => { e.nombre = p.nombre; e.rut = p.rut; });
           if (!data.activo && asignados.length) toast(`Atención: mantiene ${plural(asignados.length, 'equipo')} asignado${asignados.length === 1 ? '' : 's'}.`, 'warn');
         }
         save();
@@ -1252,8 +1365,8 @@
       body: `
         <div class="holder"><span class="avatar">${initials(p.nombre)}</span><div><div class="muted">${esc(p.rut)} · ${esc(p.cargo || '')} · ${esc(p.unidad || '')}</div><div class="muted">${esc(regionName(p.region))} · ${esc(p.email || '')} ${p.activo ? '' : '· <span class="badge b-warn">Inactivo</span>'}</div></div></div>
         <h3 style="font-size:15px;margin-top:6px">Equipos asignados (${eqs.length})</h3>
-        ${eqs.length ? `<div class="table-wrap"><table><thead><tr><th>Inventario</th><th>Tipo</th><th>Marca / modelo</th><th>Serie</th><th>Desde</th></tr></thead><tbody>
-          ${eqs.map(e => `<tr class="clickable" data-go="${e.id}"><td class="mono"><strong>${esc(e.inventario)}</strong></td><td>${esc(e.tipo)}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td class="mono">${esc(e.serie)}</td><td>${fmtDate(e.fechaAsignacion)}</td></tr>`).join('')}
+        ${eqs.length ? `<div class="table-wrap"><table><thead><tr><th>N° de serie</th><th>Formato</th><th>Marca / modelo PC</th><th>Oficina</th><th>Desde</th></tr></thead><tbody>
+          ${eqs.map(e => `<tr class="clickable" data-go="${e.id}"><td class="mono"><strong>${esc(e.serie || '—')}</strong><span class="sub">${esc(e.inventario)}</span></td><td>${esc(e.formato || '—')}</td><td>${esc(e.marca)} ${esc(e.modelo)}</td><td>${esc(e.oficina || '—')}</td><td>${e.fechaAsignacion ? fmtDate(e.fechaAsignacion) : '—'}</td></tr>`).join('')}
           </tbody></table></div>` : '<p class="muted" style="margin:0">No tiene equipos asignados.</p>'}
         ${hist.length ? `<h3 style="font-size:15px;margin-top:6px">Movimientos recientes</h3><ul class="timeline">${hist.map(m => `<li style="--tl:${tlColor(m.tipo)}"><div class="t-head"><span class="t-type">${esc(m.tipo)}</span><span class="mono">${esc(m.inventario)}</span><span class="t-date">${fmtDateTime(m.fecha)}</span></div></li>`).join('')}</ul>` : ''}`,
       footer: `<button type="button" class="btn" data-close>Cerrar</button>
@@ -1277,7 +1390,7 @@
       ${isAdmin() ? `<div class="toolbar"><button class="btn primary" id="btn-nuevo">${I('plus')}Nuevo contrato</button></div>` : ''}
       <div class="contracts">${list.map(c => {
         const st = contratoStatus(c);
-        const eqs = D().equipos.filter(e => e.contratoId === c.id && inScope(e));
+        const eqs = D().equipos.filter(e => inScope(e) && contratoDe(e) === c);
         const vig = eqs.filter(e => e.estado !== 'Baja');
         const total = Math.max(1, daysBetween(c.fechaInicio, c.fechaTermino));
         const elapsed = Math.min(100, Math.max(0, daysBetween(c.fechaInicio, todayISO()) / total * 100));
@@ -1438,11 +1551,11 @@
     const vacio = !d.equipos.length && !d.personas.length && !d.contratos.length;
     el.innerHTML = `
       <div class="grid g-3">
-        <section class="panel tool-card"><span class="ic">${I('upload')}</span><h3>Importar equipos desde Excel</h3>
-          <p>Cargue la planilla actual (.xlsx o .csv). El sistema reconoce las columnas por su nombre, valida duplicados de inventario y serie, y crea los funcionarios responsables que no existan.</p>
+        <section class="panel tool-card"><span class="ic">${I('upload')}</span><h3>Importar planilla de inventario</h3>
+          <p>Cargue la planilla «Catastro Nacional UIA Unificado» (.xlsx). Se leen todas las hojas regionales con sus 13 columnas; el estado se toma de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…) y se crean los funcionarios con RUT válido.</p>
           <div class="page-actions"><button class="btn primary" id="b-import">Importar planilla</button><button class="btn" id="b-template">${I('download')}Plantilla</button></div></section>
         <section class="panel tool-card"><span class="ic">${I('download')}</span><h3>Exportar catastro completo</h3>
-          <p>Genera un Excel con todos los equipos (incluidas las bajas) de todas las regiones, en el formato de la planilla institucional.</p>
+          <p>Genera la planilla oficial con todos los equipos (incluidas las bajas): hoja RESUMEN con sus fórmulas y una hoja por región, con el mismo formato, columnas y estilos.</p>
           <div class="page-actions"><button class="btn" id="b-export-all">Exportar a Excel</button></div></section>
         <section class="panel tool-card"><span class="ic">${I('database')}</span><h3>Respaldo del sistema</h3>
           <p>Descargue un archivo JSON con toda la información (equipos, funcionarios, contratos, usuarios e historial) o restaure uno previo.</p>
@@ -1456,7 +1569,7 @@
           <div><dt>Contratos</dt><dd>${d.contratos.length}</dd></div>
           <div><dt>Usuarios</dt><dd>${d.users.length}</dd></div>
           <div><dt>Movimientos</dt><dd>${d.movimientos.length.toLocaleString('es-CL')}</dd></div>
-          <div><dt>Excel</dt><dd>${window.XLSX ? 'Disponible (.xlsx)' : 'Sin conexión: solo CSV'}</dd></div>
+          <div><dt>Planilla</dt><dd>RESUMEN + ${Planilla.ORDEN.length} hojas</dd></div>
         </dl></div>
       </section>
       <section class="panel tool-card" style="margin-top:18px;flex-direction:row;align-items:center;flex-wrap:wrap">
@@ -1468,7 +1581,7 @@
       </section>`;
     $('#b-import').addEventListener('click', importEquiposModal);
     $('#b-template').addEventListener('click', downloadTemplate);
-    $('#b-export-all').addEventListener('click', () => exportRows(D().equipos.slice().sort((a, b) => a.inventario.localeCompare(b.inventario, 'es', { numeric: true })).map(equipoRow), 'catastro_equipos_nacional', 'Catastro'));
+    $('#b-export-all').addEventListener('click', () => D().equipos.length ? descargarPlanilla(D().equipos) : toast('No hay equipos para exportar.', 'warn'));
     $('#b-backup').addEventListener('click', () => { downloadBlob(JSON.stringify(D(), null, 1), `respaldo_catastro_${todayISO()}.json`, 'application/json'); toast('Respaldo descargado.'); });
     $('#b-restore').addEventListener('click', restoreModal);
     const conDatosReales = !d.demo && !vacio;
@@ -1485,17 +1598,7 @@
   }
 
   function downloadTemplate() {
-    const rows = [{
-      'N° inventario': 'CONAF-20001', 'N° serie': 'PF3ABC12', 'Tipo': 'Notebook', 'Marca': 'Lenovo', 'Modelo': 'ThinkPad E14 Gen 5',
-      'Propiedad': 'Arrendado', 'Contrato': D().contratos[0] ? D().contratos[0].codigo : '', 'Región': 'Maule', 'Unidad': 'Dirección Regional',
-      'Ubicación': 'Oficina 12', 'Estado': 'Asignado', 'RUT responsable': '12.345.678-5', 'Responsable': 'Nombre Apellido Apellido',
-      'Fecha alta': fmtDate(todayISO()), 'Observaciones': ''
-    }, {
-      'N° inventario': 'CONAF-20002', 'N° serie': '5CG1234XYZ', 'Tipo': 'Monitor', 'Marca': 'HP', 'Modelo': 'P24 G5',
-      'Propiedad': 'Propio', 'Contrato': '', 'Región': 'Metropolitana', 'Unidad': '', 'Ubicación': 'Bodega TI', 'Estado': 'Disponible',
-      'RUT responsable': '', 'Responsable': '', 'Fecha alta': fmtDate(todayISO()), 'Observaciones': ''
-    }];
-    exportRows(rows, 'plantilla_importacion', 'Equipos');
+    descargarPlanilla([], 'Plantilla_Catastro_Nacional_UIA.xlsx');
   }
 
   function restoreModal() {
@@ -1524,153 +1627,106 @@
     });
   }
 
-  /* ---------- Importación de equipos ---------- */
-  function mapHeader(h) {
-    const n = norm(h).replace(/[^a-z0-9]/g, '');
-    if (!n) return null;
-    if (n.includes('inventario') || n === 'inv' || n === 'ninv') return 'inventario';
-    if (n.includes('serie') || n === 'sn' || n.includes('serial')) return 'serie';
-    if (n.includes('rut')) return 'rut';
-    if (n.includes('responsable') || n.includes('asignado') || n.includes('funcionario') || n === 'usuario' || n.includes('nombre')) return 'responsable';
-    if (n.includes('contrato') || n.includes('licitacion')) return 'contrato';
-    if (n.includes('propiedad') || n.includes('arriendo') || n.includes('arrendado') || n.includes('propio') || n.includes('tenencia')) return 'propiedad';
-    if (n.includes('tipo') || n.includes('equipo') || n.includes('categoria')) return 'tipo';
-    if (n.includes('marca') || n.includes('fabricante')) return 'marca';
-    if (n.includes('modelo')) return 'modelo';
-    if (n.includes('region')) return 'region';
-    if (n.includes('unidad') || n.includes('depto') || n.includes('departamento') || n.includes('area')) return 'unidad';
-    if (n.includes('ubicacion') || n.includes('oficina')) return 'ubicacion';
-    if (n.includes('estado')) return 'estado';
-    if (n.includes('fecha') && (n.includes('alta') || n.includes('ingreso') || n.includes('adquisicion'))) return 'fechaAlta';
-    if (n.includes('observ') || n.includes('comentario') || n.includes('nota')) return 'observaciones';
-    return null;
-  }
-  function matchRegion(v) {
-    const n = norm(v).replace(/^region (de |del |de la )?/, '').replace(/[^a-z0-9 ']/g, '').trim();
-    if (!n) return '';
-    const byCode = REGIONES.find(r => norm(r.code) === n);
-    if (byCode) return byCode.code;
-    const byName = REGIONES.find(r => norm(r.name) === n) || REGIONES.find(r => norm(r.name).includes(n) || n.includes(norm(r.name)));
-    if (byName) return byName.code;
-    if (n.includes('santiago') || n === 'rm') return 'RM';
-    if (n.includes('central') || n === 'nivel central') return 'OC';
-    if (n.includes('bernardo') || n.includes('ohiggins')) return 'VI';
-    return '';
-  }
-  // Devuelve uno de los TIPOS, o '' si la planilla trae un tipo que el catastro no maneja
-  function matchTipo(v) {
-    const n = norm(v);
-    if (!n) return '';
-    const exact = TIPOS.find(t => norm(t) === n);
-    if (exact) return exact;
-    if (/\baio\b|all.?in.?one|todo en uno/.test(n)) return 'AIO';
-    if (/notebook|laptop|portatil/.test(n)) return 'Notebook';
-    if (/monitor|pantalla/.test(n)) return 'Monitor';
-    if (/impres|multifunc|scanner|escaner/.test(n)) return 'Impresora';
-    if (/escritorio|desktop|cpu|pc\b|computador|torre/.test(n)) return 'Desktop';
-    return '';
-  }
-  function matchEstado(v) {
-    const n = norm(v);
-    if (/baja/.test(n)) return 'Baja';
-    if (/asign|en uso|uso/.test(n)) return 'Asignado';
-    if (/dispon|bodega|stock|libre/.test(n)) return 'Disponible';
-    return '';
-  }
-
-  function analyzeImport(rawRows, opts) {
-    const res = { nuevos: [], actualizar: [], errores: [], personasNuevas: 0, total: rawRows.length };
-    if (!rawRows.length) return res;
-    const headers = Object.keys(rawRows[0]);
-    const map = {}; headers.forEach(h => { const k = mapHeader(h); if (k && !Object.values(map).includes(k)) map[h] = k; });
-    res.columnas = Object.entries(map).map(([h, k]) => `${h} → ${k}`);
-    if (!Object.keys(map).length) {
-      res.errores.push('No se reconoció ninguna columna. Revise los encabezados de la planilla (sección 9.2 del manual) o use la plantilla.');
+  /* ---------- Importación de la planilla ---------- */
+  // Lee todas las hojas regionales (la hoja RESUMEN se omite). Cada fila es un equipo: se guardan sus
+  // 13 columnas tal como vienen y el estado se deduce de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…).
+  function analyzeImport(sheets, opts) {
+    const lect = Planilla.interpretar(sheets);
+    const res = { nuevos: [], actualizar: [], errores: [], avisos: [], personas: [], total: lect.filas.length, hojas: lect.hojas, estados: { Asignado: 0, Disponible: 0, Baja: 0, reparacion: 0 } };
+    if (lect.sinEncabezado.length) res.avisos.push(`${plural(lect.sinEncabezado.length, 'hoja')} sin la fila de encabezados de la planilla (se omite${lect.sinEncabezado.length === 1 ? '' : 'n'}): ${lect.sinEncabezado.join(', ')}.`);
+    if (!lect.hojas.length) {
+      res.errores.push('No se encontró la fila de encabezados (RUT, NOMBRE DEL TRABAJADOR, REGION, OFICINA, MARCA PC, MODELO PC, FORMATO, NUMERO DE SERIE, PROPIEDAD…) en ninguna hoja. Use la plantilla.');
       return res;
     }
-    // El N° de inventario y el N° de serie son opcionales: sin inventario se asigna el siguiente
-    // correlativo libre (sin chocar con los del sistema ni con los que trae la planilla)
-    const usados = new Set(D().equipos.map(e => norm(e.inventario)));
-    const colInv = Object.keys(map).find(h => map[h] === 'inventario');
-    if (colInv) rawRows.forEach(raw => { const v = String(raw[colInv] ?? '').trim(); if (v) usados.add(norm(v)); });
-    let correlativo = D().nextInventario || 10001;
-    const siguienteInventario = () => { while (usados.has(norm('CONAF-' + correlativo))) correlativo++; const v = 'CONAF-' + correlativo; usados.add(norm(v)); return v; };
-    const asignados = [];
-    let sinSerie = 0;
-    const seenInv = new Set(), seenSerie = new Set();
-    const tmpPersonas = [];
-    rawRows.forEach((raw, i) => {
-      const line = i + 2;
-      const r = {}; Object.entries(map).forEach(([h, k]) => { r[k] = String(raw[h] ?? '').trim(); });
-      if (!Object.values(r).some(Boolean)) return;
-      const serie = (r.serie || '').toUpperCase();
-      if (r.inventario && seenInv.has(norm(r.inventario))) return res.errores.push(`Fila ${line}: inventario ${r.inventario.toUpperCase()} repetido en la planilla.`);
-      if (serie && seenSerie.has(norm(serie))) return res.errores.push(`Fila ${line}: serie ${serie} repetida en la planilla.`);
-      const region = matchRegion(r.region) || opts.regionDefault;
-      if (!region) return res.errores.push(`Fila ${line}: región "${r.region || '(vacía)'}" no reconocida.`);
-      const tipo = matchTipo(r.tipo);
-      if (!tipo) return res.errores.push(`Fila ${line}: tipo "${r.tipo || '(vacío)'}" no reconocido; debe ser ${TIPOS.join(', ')}.`);
-      const existing = r.inventario ? D().equipos.find(e => norm(e.inventario) === norm(r.inventario)) : null;
-      const serieOwner = serie ? D().equipos.find(e => norm(e.serie) === norm(serie)) : null;
-      if (serieOwner && serieOwner !== existing) return res.errores.push(`Fila ${line}: la serie ${serie} ya pertenece a ${serieOwner.inventario}.`);
-      if (existing && !opts.actualizar) return res.errores.push(`Fila ${line}: ${existing.inventario} ya existe (active "Actualizar existentes" para sobrescribir).`);
-      // Fila válida: se reservan su inventario (o uno nuevo) y su serie
-      const inv = r.inventario ? r.inventario.toUpperCase() : siguienteInventario();
-      if (!r.inventario) asignados.push(inv);
-      if (!serie) sinSerie++;
-      seenInv.add(norm(inv)); if (serie) seenSerie.add(norm(serie));
-      let propiedad = /arr|leasing|renta/.test(norm(r.propiedad)) ? 'Arrendado' : (r.contrato ? 'Arrendado' : 'Propio');
-      let contratoId = '';
-      if (propiedad === 'Arrendado') {
-        const c = D().contratos.find(c => norm(c.codigo) === norm(r.contrato)) || D().contratos.find(c => r.contrato && norm(c.proveedor).includes(norm(r.contrato)));
-        if (c) contratoId = c.id;
-        else if (r.contrato) res.errores.push(`Fila ${line}: contrato "${r.contrato}" no existe; se importa como arrendado sin contrato.`);
+    const base = opts.vaciar ? [] : D().equipos;
+    const porSerie = new Map(), porInv = new Map();
+    base.forEach(e => {
+      porInv.set(norm(e.inventario), e);
+      if (e.serie) { const k = norm(e.serie); porSerie.set(k, (porSerie.get(k) || []).concat(e)); }
+    });
+    const personaPorRut = new Map((opts.vaciar ? [] : D().personas).map(p => [rutClean(p.rut), p]));
+    const usadosInv = new Set(base.map(e => norm(e.inventario)));
+    lect.filas.forEach(f => { if (f.datos.inventario) usadosInv.add(norm(f.datos.inventario)); });
+    let correlativo = opts.vaciar ? 10001 : (D().nextInventario || 10001);
+    const siguienteInventario = () => { while (usadosInv.has(norm('CONAF-' + correlativo))) correlativo++; const v = 'CONAF-' + correlativo; usadosInv.add(norm(v)); return v; };
+
+    const seenSerie = new Map(), actualizados = new Set();
+    const rutInvalidos = [], sinFormato = [], fueraCatalogo = new Map(), sinRegionTxt = new Set();
+    let sinSerie = 0, yaExisten = 0, rutDistintoNombre = 0;
+    const nombrePorRut = new Map();
+
+    lect.filas.forEach(f => {
+      const d = f.datos, ref = `${f.hoja}, fila ${f.fila}`;
+      const region = f.region || opts.regionDefault;
+      if (!region) { sinRegionTxt.add(f.regionTexto || '(vacía)'); return res.errores.push(`${ref}: región «${f.regionTexto || '(vacía)'}» no reconocida; se omite.`); }
+      const serie = d.serie || '';
+      let existing = null;
+      if (d.inventario && porInv.has(norm(d.inventario))) existing = porInv.get(norm(d.inventario));
+      else if (serie && porSerie.has(norm(serie))) {
+        const l = porSerie.get(norm(serie));
+        if (l.length === 1) existing = l[0];
       }
-      // Responsable
+      if (existing && !opts.actualizar) { yaExisten++; return; }
+      if (existing && actualizados.has(existing)) existing = null; // la misma serie aparece otra vez en el archivo: se agrega como otro equipo
+      if (serie) seenSerie.set(norm(serie), (seenSerie.get(norm(serie)) || []).concat({ serie, hoja: f.hoja })); else sinSerie++;
+      if (!d.formato) sinFormato.push(ref);
+      else if (!FORMATOS.includes(d.formato.toUpperCase())) fueraCatalogo.set(d.formato, (fueraCatalogo.get(d.formato) || 0) + 1);
+
+      const est = estadoDesdeNombre(d.nombre);
       let personaRef = null;
-      if (r.rut || r.responsable) {
-        if (r.rut && !rutValid(r.rut)) res.errores.push(`Fila ${line}: RUT "${r.rut}" inválido; se omite el responsable.`);
-        else {
-          const found = (r.rut && (D().personas.find(p => rutClean(p.rut) === rutClean(r.rut)) || tmpPersonas.find(p => rutClean(p.rut) === rutClean(r.rut))))
-            || (!r.rut && r.responsable && (D().personas.find(p => p.region === region && norm(p.nombre) === norm(r.responsable)) || tmpPersonas.find(p => p.region === region && norm(p.nombre) === norm(r.responsable))));
-          if (found) personaRef = found;
-          else if (r.rut && r.responsable) { personaRef = { id: Store.uid('p'), rut: rutFormat(r.rut), nombre: r.responsable, cargo: '', unidad: r.unidad || '', region, email: '', activo: true, _new: true }; tmpPersonas.push(personaRef); }
-          else res.errores.push(`Fila ${line}: responsable "${r.responsable || r.rut}" no encontrado (se requiere RUT y nombre para crearlo).`);
+      if (d.rut) {
+        if (!rutValid(d.rut)) rutInvalidos.push(`${d.rut} (${ref})`);
+        else if (est.estado === 'Asignado') {
+          const k = rutClean(d.rut);
+          personaRef = personaPorRut.get(k);
+          if (!personaRef) {
+            personaRef = { id: Store.uid('p'), rut: rutFormat(d.rut), nombre: d.nombre || '(sin nombre)', cargo: '', unidad: d.oficina || '', region, email: '', activo: true };
+            personaPorRut.set(k, personaRef); res.personas.push(personaRef);
+          }
+          if (nombrePorRut.has(k) && norm(nombrePorRut.get(k)) !== norm(d.nombre)) rutDistintoNombre++;
+          nombrePorRut.set(k, d.nombre);
         }
       }
-      // "En reparación" en la planilla: queda Disponible y marcado en servicio técnico
-      const enReparacion = /repar|servicio tecnico|falla/.test(norm(r.estado));
-      let estado = (enReparacion ? 'Disponible' : matchEstado(r.estado)) || (personaRef ? 'Asignado' : 'Disponible');
-      if (estado === 'Asignado' && !personaRef) estado = 'Disponible';
-      const item = {
-        existing, data: {
-          inventario: inv, serie, tipo, marca: r.marca || 'Sin marca', modelo: r.modelo || '', propiedad, contratoId, region,
-          unidad: UNIDADES.find(u => norm(u) === norm(r.unidad)) || r.unidad || '', ubicacion: r.ubicacion || '', estado,
-          reparacion: enReparacion ? { desde: nowStamp(), falla: r.observaciones || 'Importado como en reparación.' } : null,
-          personaId: estado === 'Asignado' && personaRef ? personaRef.id : '', fechaAlta: parseFlexDate(r.fechaAlta) || todayISO(),
-          observaciones: r.observaciones || ''
-        }, persona: estado === 'Asignado' ? personaRef : null
+      res.estados[est.estado]++; if (est.reparacion) res.estados.reparacion++;
+      const data = {
+        rut: d.rut || '', nombre: d.nombre || '', region, oficina: d.oficina || '', marca: d.marca || '', modelo: d.modelo || '',
+        formato: d.formato || '', serie, propiedad: d.propiedad || '', proveedor: d.proveedor || '', fechaArriendo: d.fechaArriendo || '',
+        pantallaModelo: d.pantallaModelo || '', pantallaSerie: d.pantallaSerie || '', serieNum: !!f.serieNum, fechaTxt: !!f.fechaTxt,
+        estado: est.estado, personaId: personaRef ? personaRef.id : '',
+        reparacion: est.reparacion ? { desde: nowStamp(), falla: 'Registrado en servicio técnico en la planilla.' } : null
       };
-      (existing ? res.actualizar : res.nuevos).push(item);
+      const item = { existing, data, ref, hoja: f.hoja, persona: personaRef, inventario: existing ? existing.inventario : (d.inventario ? d.inventario.toUpperCase() : null) };
+      if (existing) { actualizados.add(existing); res.actualizar.push(item); } else res.nuevos.push(item);
     });
-    // Avisos generales (no impiden importar), al inicio de la lista
-    if (sinSerie) res.errores.unshift(`${plural(sinSerie, 'equipo')} sin N° de serie: se importa${sinSerie === 1 ? '' : 'n'} con la serie vacía; puede completarse después en su ficha.`);
-    if (asignados.length) res.errores.unshift(`${plural(asignados.length, 'equipo')} sin N° de inventario: se asigna${asignados.length === 1 ? ` ${asignados[0]}` : `n los correlativos ${asignados[0]} a ${asignados.at(-1)}`}.`);
-    res.personas = tmpPersonas;
-    res.personasNuevas = tmpPersonas.length;
+    res.nuevos.forEach(it => { if (!it.inventario) it.inventario = siguienteInventario(); });
+
+    // Avisos (no impiden importar)
+    if (yaExisten) res.avisos.unshift(`${plural(yaExisten, 'equipo')} ya existe${yaExisten === 1 ? '' : 'n'} en el sistema (mismo N° de serie) y se omite${yaExisten === 1 ? '' : 'n'}. Active «Actualizar equipos existentes» para sobrescribirlos.`);
+    const repetidas = [...seenSerie.entries()].filter(([, l]) => l.length > 1);
+    if (repetidas.length) res.avisos.push(`${plural(repetidas.length, 'número de serie repetido', 'números de serie repetidos')} dentro de la planilla; se importan igual, como equipos distintos: ${repetidas.slice(0, 8).map(([, l]) => `${l[0].serie} (${[...new Set(l.map(x => x.hoja))].join(', ')})`).join('; ')}${repetidas.length > 8 ? '…' : ''}.`);
+    if (sinSerie) res.avisos.push(`${plural(sinSerie, 'equipo')} sin NUMERO DE SERIE; puede completarse después en su ficha.`);
+    if (sinFormato.length) res.avisos.push(`${plural(sinFormato.length, 'equipo')} sin FORMATO (se importa${sinFormato.length === 1 ? '' : 'n'} con la columna vacía).`);
+    if (fueraCatalogo.size) res.avisos.push(`Formatos fuera del catálogo (${FORMATOS.join(', ')}), se conservan tal cual: ${[...fueraCatalogo.entries()].map(([k, n]) => `${k} (${n})`).join(', ')}.`);
+    if (rutInvalidos.length) res.avisos.push(`${plural(rutInvalidos.length, 'RUT')} con dígito verificador inválido; se conservan como texto y no se crea ficha de funcionario: ${rutInvalidos.slice(0, 10).join('; ')}${rutInvalidos.length > 10 ? '…' : ''}`);
+    if (rutDistintoNombre) res.avisos.push(`${plural(rutDistintoNombre, 'fila')} con un RUT ya usado por otro nombre; el equipo conserva el nombre de la planilla y queda vinculado al funcionario de ese RUT.`);
+    const asignadosSinRut = res.nuevos.concat(res.actualizar).filter(it => it.data.estado === 'Asignado' && !it.persona).length;
+    if (asignadosSinRut) res.avisos.push(`${plural(asignadosSinRut, 'equipo asignado', 'equipos asignados')} a nombres sin RUT válido (por ejemplo usuarios genéricos); quedan como asignados según la planilla, sin ficha de funcionario.`);
     return res;
   }
 
   function importEquiposModal() {
-    let rows = null, fileName = '';
+    let sheets = null, fileName = '';
     const form = openModal({
-      title: 'Importar equipos desde Excel', size: 'lg', submitLabel: 'Importar',
+      title: 'Importar planilla de inventario', size: 'lg', submitLabel: 'Importar',
       body: `
-        <label class="dropzone" id="dz"><input type="file" id="imp-file" accept=".xlsx,.xls,.csv" hidden>
-          <strong>Seleccione o arrastre la planilla aquí</strong>Formatos .xlsx, .xls o .csv · Si falta el N° de inventario se asigna un correlativo; el N° de serie es opcional</label>
+        <label class="dropzone" id="dz"><input type="file" id="imp-file" accept=".xlsx,.csv" hidden>
+          <strong>Seleccione o arrastre la planilla aquí</strong>Formato «Catastro Nacional UIA Unificado» (.xlsx): se leen todas las hojas regionales; la hoja RESUMEN se omite. También acepta .csv con los mismos encabezados.</label>
         <div class="form-grid">
-          <label class="field"><span>Región por defecto</span><select name="regionDefault">${regionOptions('', 'Ninguna (usar columna Región)')}</select><small>Se usa cuando la fila no indica región.</small></label>
-          <div class="field" style="justify-content:center"><label class="check"><input type="checkbox" name="actualizar" value="1"> Actualizar equipos existentes (mismo N° inventario)</label></div>
+          <label class="field"><span>Región por defecto</span><select name="regionDefault">${regionOptions('', 'Ninguna (usar columna REGION u hoja)')}</select><small>Se usa cuando la fila no indica una región reconocible.</small></label>
+          <div class="field" style="justify-content:center;gap:8px">
+            <label class="check"><input type="checkbox" name="vaciar" value="1"> Reemplazar el catastro actual por esta planilla</label>
+            <label class="check"><input type="checkbox" name="actualizar" value="1"> Actualizar equipos existentes (mismo N° de serie)</label>
+          </div>
         </div>
         <div id="imp-result"></div>`,
       onOpen: f => {
@@ -1678,55 +1734,72 @@
         const handle = async file => {
           fileName = file.name;
           $('#imp-result', f).innerHTML = '<p class="muted">Leyendo archivo…</p>';
-          try { rows = await readTableFile(file); preview(); }
-          catch (err) { rows = null; $('#imp-result', f).innerHTML = `<p class="form-error">${esc(err.message)}</p>`; }
+          try { sheets = await readTableFile(file); preview(); }
+          catch (err) { sheets = null; $('#imp-result', f).innerHTML = `<p class="form-error">${esc(err.message)}</p>`; }
         };
         inp.addEventListener('change', () => inp.files[0] && handle(inp.files[0]));
         dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
         dz.addEventListener('dragleave', () => dz.classList.remove('over'));
         dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) handle(e.dataTransfer.files[0]); });
-        f.elements.regionDefault.addEventListener('change', () => rows && preview());
-        f.elements.actualizar.addEventListener('change', () => rows && preview());
+        ['regionDefault', 'actualizar', 'vaciar'].forEach(n => f.elements[n].addEventListener('change', () => {
+          f.elements.actualizar.disabled = f.elements.vaciar.checked;
+          if (sheets) preview();
+        }));
       },
       onSubmit: (fd, f) => {
-        if (!rows) { toast('Seleccione un archivo primero.', 'warn'); return false; }
-        const res = analyzeImport(rows, { regionDefault: fd.regionDefault, actualizar: !!fd.actualizar });
-        if (!res.nuevos.length && !res.actualizar.length) { toast('No hay filas válidas para importar.', 'error'); return false; }
-        (res.personas || []).forEach(p => { delete p._new; D().personas.push(p); });
+        if (!sheets) { toast('Seleccione un archivo primero.', 'warn'); return false; }
+        const opts = { regionDefault: fd.regionDefault, actualizar: !!fd.actualizar && !fd.vaciar, vaciar: !!fd.vaciar };
+        const res = analyzeImport(sheets, opts);
+        if (!res.nuevos.length && !res.actualizar.length) { toast('No hay filas para importar.', 'error'); return false; }
+        if (opts.vaciar) {
+          const d = D();
+          Object.assign(d, { demo: false, personas: [], equipos: [], movimientos: [], solicitudes: [], nextInventario: 10001, nextOrden: 1 });
+          if (d.contratos.some(c => /demo/i.test(c.proveedor))) d.contratos = d.contratos.filter(c => !/demo/i.test(c.proveedor));
+        }
+        res.personas.forEach(p => D().personas.push(p));
+        const hoy = todayISO();
         res.nuevos.forEach(it => {
-          const e = Object.assign({ id: Store.uid('e'), fechaAsignacion: it.data.personaId ? it.data.fechaAlta : '', fechaBaja: it.data.estado === 'Baja' ? todayISO() : '', motivoBaja: it.data.estado === 'Baja' ? 'Otro' : '', detalleBaja: it.data.estado === 'Baja' ? 'Importado como dado de baja.' : '', solicitudBaja: null }, it.data);
+          const e = Object.assign({ id: Store.uid('e'), inventario: it.inventario, orden: nextOrden(), contratoId: '', fechaAlta: hoy, fechaAsignacion: '', fechaBaja: '', motivoBaja: '', detalleBaja: '', solicitudBaja: null, observaciones: '' }, it.data);
+          if (e.estado === 'Baja') { e.motivoBaja = 'Registrada en la planilla'; e.detalleBaja = `Figura como «${e.nombre}» en ${fileName}.`; }
           D().equipos.push(e);
-          log(e, 'Alta', `Importado desde ${fileName}. ${e.tipo} ${e.marca} ${e.modelo}, ${e.propiedad.toLowerCase()}.`);
-          if (it.persona) log(e, 'Asignación', `Asignado a ${it.persona.nombre} (${it.persona.rut}) según planilla.`);
+          log(e, 'Alta', `Importado desde ${fileName} (${it.ref}).${e.estado === 'Asignado' ? ' Asignado a ' + (e.nombre || 'responsable') + (e.rut ? ' (' + e.rut + ')' : '') + '.' : ' Figura como «' + (e.nombre || 'sin nombre') + '».'}`);
         });
         res.actualizar.forEach(it => {
           const e = it.existing;
-          const before = e.personaId;
+          const antes = e.estado;
           Object.assign(e, it.data);
-          if (e.personaId && e.personaId !== before) e.fechaAsignacion = todayISO();
-          if (e.estado === 'Baja' && !e.fechaBaja) { e.fechaBaja = todayISO(); e.motivoBaja = 'Otro'; }
-          log(e, 'Modificación', `Actualizado desde ${fileName}.`);
+          if (e.estado === 'Baja' && antes !== 'Baja') { e.fechaBaja = hoy; e.motivoBaja = 'Registrada en la planilla'; e.solicitudBaja = null; }
+          if (e.estado !== 'Baja') { e.fechaBaja = ''; e.motivoBaja = ''; e.detalleBaja = ''; }
+          log(e, 'Modificación', `Actualizado desde ${fileName} (${it.ref}).`);
         });
         // El próximo correlativo sugerido queda después del mayor CONAF-##### registrado
         const maxInv = Math.max(0, ...D().equipos.map(e => /^CONAF-(\d+)$/.exec(e.inventario)).filter(Boolean).map(m => Number(m[1])));
         if (maxInv >= (D().nextInventario || 0)) D().nextInventario = maxInv + 1;
-        save();
-        toast(`Importación lista: ${res.nuevos.length} nuevos, ${res.actualizar.length} actualizados.`);
+        if (!Store.save()) {
+          toast('No fue posible guardar: el almacenamiento del navegador está lleno. Descargue un respaldo y limpie datos antiguos.', 'error');
+          Store.load(); return false;
+        }
+        toast(`Importación lista: ${res.nuevos.length.toLocaleString('es-CL')} nuevos, ${res.actualizar.length.toLocaleString('es-CL')} actualizados.`);
+        resetViewState();
         setTimeout(route, 0);
       }
     });
     function preview() {
-      const res = analyzeImport(rows, { regionDefault: form.elements.regionDefault.value, actualizar: form.elements.actualizar.checked });
+      const vaciar = form.elements.vaciar.checked;
+      const res = analyzeImport(sheets, { regionDefault: form.elements.regionDefault.value, actualizar: form.elements.actualizar.checked && !vaciar, vaciar });
+      const e = res.estados;
       $('#imp-result', form).innerHTML = `
-        <p style="margin:0 0 10px"><b>${esc(fileName)}</b> · ${plural(res.total, 'fila')} leída${res.total === 1 ? '' : 's'}</p>
+        <p style="margin:0 0 10px"><b>${esc(fileName)}</b> · ${plural(res.hojas.length, 'hoja')} · ${plural(res.total, 'fila')} con datos</p>
+        ${vaciar ? `<div class="callout danger" style="margin-bottom:10px">${I('alert')}<div>Se eliminarán los ${plural(D().equipos.length, 'equipo')}, funcionarios, movimientos y solicitudes actuales. Las cuentas de usuario y los contratos se conservan.</div></div>` : ''}
         <div class="import-stats">
-          <div><b style="color:var(--ok)">${res.nuevos.length}</b><span>equipos nuevos</span></div>
-          <div><b style="color:var(--info)">${res.actualizar.length}</b><span>a actualizar</span></div>
-          <div><b>${res.personasNuevas}</b><span>funcionarios nuevos</span></div>
-          <div><b style="color:${res.errores.length ? 'var(--danger)' : 'inherit'}">${res.errores.length}</b><span>observaciones</span></div>
+          <div><b style="color:var(--ok)">${res.nuevos.length.toLocaleString('es-CL')}</b><span>equipos nuevos</span></div>
+          <div><b style="color:var(--info)">${res.actualizar.length.toLocaleString('es-CL')}</b><span>a actualizar</span></div>
+          <div><b>${res.personas.length.toLocaleString('es-CL')}</b><span>funcionarios nuevos</span></div>
+          <div><b style="color:${res.errores.length ? 'var(--danger)' : 'inherit'}">${res.errores.length}</b><span>filas omitidas</span></div>
         </div>
-        ${res.columnas ? `<p class="muted" style="font-size:13px;margin:10px 0 0">Columnas reconocidas: ${esc(res.columnas.join(' · '))}</p>` : ''}
-        ${res.errores.length ? `<ul class="err-list" style="margin-top:10px">${res.errores.slice(0, 200).map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}`;
+        <p class="muted" style="font-size:13px;margin:10px 0 0">Estados según NOMBRE DEL TRABAJADOR: ${e.Asignado.toLocaleString('es-CL')} asignados · ${e.Disponible.toLocaleString('es-CL')} disponibles${e.reparacion ? ` (${e.reparacion} en servicio técnico)` : ''} · ${e.Baja.toLocaleString('es-CL')} de baja.</p>
+        ${res.avisos.length ? `<ul class="err-list warn-list" style="margin-top:10px">${res.avisos.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${res.errores.length ? `<ul class="err-list" style="margin-top:10px">${res.errores.slice(0, 200).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
     }
   }
 

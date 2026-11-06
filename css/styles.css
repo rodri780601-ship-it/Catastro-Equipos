@@ -395,3 +395,14 @@ td.actions{text-align:right;white-space:nowrap}
   .content{padding:0}
   .table-wrap,.panel{box-shadow:none;border-color:#ccc}
 }
+
+/* ---------- Formato planilla (v2) ---------- */
+.form-section{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--heading);margin:4px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.form-section small{font-weight:500;text-transform:none;letter-spacing:0;color:var(--muted)}
+.form-grid + .form-section{margin-top:18px}
+.field .readonly{padding:9px 12px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);font-size:14px;min-height:38px}
+.err-list.warn-list{background:var(--warn-bg);color:var(--warn);border-color:#efd9a8}
+.eq-table td.person .name{max-width:220px}
+.eq-table td.of{min-width:150px;max-width:230px}
+.eq-table td.of .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px}
+.eq-table td{vertical-align:middle}
