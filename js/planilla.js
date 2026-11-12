@@ -2,7 +2,9 @@
    planilla.js — Formato oficial de la planilla de inventario
    "AAAA_Catastro_Nacional_UIA_Unificado_DD.MM.AAAA.xlsx"
    Hoja RESUMEN con fórmulas + una hoja por región, con las
-   mismas 13 columnas, estilos, anchos, filtros y paneles.
+   mismas 15 columnas (las 13 oficiales, con el monitor en lugar
+   de la pantalla, más las 2 del monitor adicional), estilos,
+   anchos, filtros y paneles.
    ========================================================= */
 'use strict';
 
@@ -20,9 +22,12 @@ const Planilla = (function () {
     { key: 'propiedad',      header: 'PROPIEDAD',              width: 12 },
     { key: 'proveedor',      header: 'PROVEEDOR (ARRIENDO)',   width: 18 },
     { key: 'fechaArriendo',  header: 'FECHA ARRIENDO',         width: 14 },
-    { key: 'pantallaModelo', header: 'PANTALLA MODELO',        width: 18 },
-    { key: 'pantallaSerie',  header: 'PANTALLA (N°Serie)',     width: 28 }
+    { key: 'pantallaModelo', header: 'MONITOR MODELO',         width: 18 },
+    { key: 'pantallaSerie',  header: 'MONITOR (N° Serie)',     width: 28 },
+    { key: 'monitor2Marca',  header: 'MONITOR ADICIONAL MODELO',     width: 22 },
+    { key: 'monitor2Serie',  header: 'MONITOR ADICIONAL (N° Serie)', width: 28 }
   ];
+  const ULTIMA_COL = String.fromCharCode(64 + COLS.length); // letra de la última columna (O)
 
   // Nombre de hoja y nombre de región (en mayúsculas, como en la columna REGION)
   const HOJAS = {
@@ -106,7 +111,7 @@ const Planilla = (function () {
       lista.forEach((e, k) => rows.push({ r: 3 + k, cells: celdas(e) }));
       hojas.push({
         name: HOJAS[code].hoja, cols: COLS.map(c => c.width), rows,
-        merges: ['A1:M1'], autoFilter: `A2:M${Math.max(ultima, 2)}`, freezeRows: 2
+        merges: [`A1:${ULTIMA_COL}1`], autoFilter: `A2:${ULTIMA_COL}${Math.max(ultima, 2)}`, freezeRows: 2
       });
       // Valores calculados del resumen (iguales a los que dan las fórmulas)
       const q = XLSX_LIB.quote(HOJAS[code].hoja), f = Math.max(ultima, 3);
@@ -155,8 +160,11 @@ const Planilla = (function () {
     propiedad: ['propiedad'],
     proveedor: ['proveedor arriendo', 'proveedor'],
     fechaArriendo: ['fecha arriendo', 'fecha de arriendo', 'fecha arriendo inicio'],
-    pantallaModelo: ['pantalla modelo', 'modelo pantalla', 'monitor modelo', 'modelo monitor'],
-    pantallaSerie: ['pantalla n serie', 'pantalla serie', 'pantalla n de serie', 'serie pantalla', 'n serie pantalla', 'monitor serie', 'serie monitor'],
+    // Se aceptan los encabezados nuevos (MONITOR …) y los de la planilla anterior (PANTALLA …)
+    pantallaModelo: ['monitor modelo', 'modelo monitor', 'marca monitor', 'pantalla modelo', 'modelo pantalla'],
+    pantallaSerie: ['monitor n serie', 'monitor n de serie', 'monitor serie', 'serie monitor', 'n serie monitor', 'pantalla n serie', 'pantalla serie', 'pantalla n de serie', 'serie pantalla', 'n serie pantalla'],
+    monitor2Marca: ['monitor adicional modelo', 'modelo monitor adicional', 'monitor adicional marca', 'marca monitor adicional'],
+    monitor2Serie: ['monitor adicional n serie', 'monitor adicional n de serie', 'monitor adicional serie', 'serie monitor adicional', 'n serie monitor adicional'],
     inventario: ['n inventario', 'n de inventario', 'inventario', 'numero de inventario', 'nro inventario']
   };
   const MAPA = {};

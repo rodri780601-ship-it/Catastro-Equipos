@@ -1,6 +1,6 @@
 # Catastro de Equipos Informáticos · CONAF
 
-Sistema web para administrar el inventario de computadores de CONAF (propios y en arriendo) por región, con perfiles de administrador y usuario regional. Desde la versión 2.0 cada equipo se registra con las mismas 13 columnas de la planilla **«Catastro Nacional UIA Unificado»**, y la planilla se importa y exporta con el mismo formato.
+Sistema web para administrar el inventario de computadores de CONAF (propios y en arriendo) por región, con perfiles de administrador y usuario regional. Desde la versión 2.0 cada equipo se registra con las columnas de la planilla **«Catastro Nacional UIA Unificado»**, y la planilla se importa y exporta con el mismo formato.
 
 ## Cómo usarlo
 
@@ -61,13 +61,13 @@ La exportación genera el mismo libro que «AAAA_Catastro_Nacional_UIA_Unificado
 
 - Hoja **RESUMEN** con las fórmulas por hoja (Total equipos, CONAF, ARRIENDO, Otra propiedad, AIO, DESKTOP) y la fila TOTAL.
 - Una hoja por región, en el orden oficial (PC OC, Arica, Tarapaca … Magallanes), con título combinado, encabezados en azul, filtros, panel inmovilizado y los mismos anchos de columna.
-- Columnas: RUT · NOMBRE DEL TRABAJADOR · REGION · OFICINA · MARCA PC · MODELO PC · FORMATO · NUMERO DE SERIE · PROPIEDAD · PROVEEDOR (ARRIENDO) · FECHA ARRIENDO · PANTALLA MODELO · PANTALLA (N°Serie).
+- Columnas: RUT · NOMBRE DEL TRABAJADOR · REGION · OFICINA · MARCA PC · MODELO PC · FORMATO · NUMERO DE SERIE · PROPIEDAD · PROVEEDOR (ARRIENDO) · FECHA ARRIENDO · MONITOR MODELO · MONITOR (N° Serie) · MONITOR ADICIONAL MODELO · MONITOR ADICIONAL (N° Serie).
 
 Reglas de equivalencia con el sistema:
 
 - El **estado** sale de NOMBRE DEL TRABAJADOR: «BAJA» → Baja; «DISPONIBLE», «BODEGA…», «Stock…», «REASIGNAR…», «sin usuario» o vacío → Disponible; «SERVICIO TÉCNICO» → Disponible en servicio técnico; cualquier nombre → Asignado. Al devolver, reparar o dar de baja un equipo, el sistema escribe ese texto en la columna y deja el RUT en blanco.
 - El **N° de inventario** (CONAF-#####) es interno del sistema y no se exporta.
-- La pantalla de un DESKTOP se registra en PANTALLA MODELO y PANTALLA (N°Serie) del mismo equipo.
+- El monitor de un DESKTOP se registra en MONITOR MODELO y MONITOR (N° Serie) del mismo equipo; un segundo monitor (DESKTOP o AIO), en MONITOR ADICIONAL MODELO y MONITOR ADICIONAL (N° Serie). Al importar se aceptan también los encabezados anteriores PANTALLA MODELO y PANTALLA (N°Serie).
 - FECHA ARRIENDO admite una fecha (se exporta como fecha dd-mm-aaaa), un año (como número) o un texto.
 - Los valores se conservan tal como vienen: importar la planilla y volver a exportarla produce el mismo contenido, celda por celda.
 

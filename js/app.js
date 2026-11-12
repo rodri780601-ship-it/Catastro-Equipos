@@ -337,7 +337,7 @@
         <tr><td>Unidad / oficina</td><td>${esc(p.unidad || eqs[0].oficina || '—')}</td></tr>
         <tr><td>Correo</td><td>${esc(p.email || '—')}</td></tr>
       </table>
-      <table><thead><tr><th>#</th><th>N° inventario</th><th>Formato</th><th>Marca / modelo PC</th><th>N° de serie</th><th>Pantalla</th><th>Propiedad</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>#</th><th>N° inventario</th><th>Formato</th><th>Marca / modelo PC</th><th>N° de serie</th><th>Monitor</th><th>Propiedad</th></tr></thead><tbody>${rows}</tbody></table>
       <p><b>Compromisos del funcionario/a:</b></p>
       <ol>
         <li>Utilizar el equipamiento exclusivamente para fines institucionales.</li>
@@ -761,11 +761,11 @@
           <label class="field"><span>Modelo PC</span><input name="modelo" value="${esc(e.modelo)}" list="dl-modelos" autocomplete="off"></label>
           <label class="field"><span>Formato <span class="req">*</span></span><select name="formato">${opt('', isNew ? 'Seleccione…' : '(sin formato)', e.formato)}${formatos.map(t => opt(t, t, e.formato)).join('')}</select></label>
           <label class="field"><span>Número de serie <span class="req">*</span></span><input name="serie" value="${esc(e.serie)}" class="mono"></label>
-          <label class="field" data-monitor><span>Marca Monitor <span class="req">*</span></span><input name="pantallaModelo" value="${esc(e.pantallaModelo)}" list="dl-pantallas" autocomplete="off"><small>Se exporta en la columna PANTALLA MODELO.</small></label>
-          <label class="field" data-monitor><span>Serie Monitor <span class="req">*</span></span><input name="pantallaSerie" value="${esc(e.pantallaSerie)}" class="mono"><small>Se exporta en la columna PANTALLA (N°Serie).</small></label>
-          <h3 class="form-section full" data-monitor2>Monitor adicional <small>(opcional; no se exporta a la planilla)</small></h3>
-          <label class="field" data-monitor2><span>Marca Monitor</span><input name="monitor2Marca" value="${esc(e.monitor2Marca)}" list="dl-pantallas" autocomplete="off"></label>
-          <label class="field" data-monitor2><span>Serie Monitor</span><input name="monitor2Serie" value="${esc(e.monitor2Serie)}" class="mono"></label>
+          <label class="field" data-monitor><span>Marca Monitor <span class="req">*</span></span><input name="pantallaModelo" value="${esc(e.pantallaModelo)}" list="dl-pantallas" autocomplete="off"><small>Se exporta en la columna MONITOR MODELO.</small></label>
+          <label class="field" data-monitor><span>Serie Monitor <span class="req">*</span></span><input name="pantallaSerie" value="${esc(e.pantallaSerie)}" class="mono"><small>Se exporta en la columna MONITOR (N° Serie).</small></label>
+          <h3 class="form-section full" data-monitor2>Monitor adicional <small>(opcional)</small></h3>
+          <label class="field" data-monitor2><span>Marca Monitor</span><input name="monitor2Marca" value="${esc(e.monitor2Marca)}" list="dl-pantallas" autocomplete="off"><small>Se exporta en la columna MONITOR ADICIONAL MODELO.</small></label>
+          <label class="field" data-monitor2><span>Serie Monitor</span><input name="monitor2Serie" value="${esc(e.monitor2Serie)}" class="mono"><small>Se exporta en la columna MONITOR ADICIONAL (N° Serie).</small></label>
           <div class="field full"><span>Propiedad <span class="req">*</span></span>
             <div class="seg">${['CONAF', 'ARRIENDO', 'OTRA'].map(v => `<label><input type="radio" name="propTipo" value="${v}" ${propTipo === v ? 'checked' : ''}><span>${v === 'OTRA' ? 'Otra' : v}</span></label>`).join('')}</div>
           </div>
@@ -1050,7 +1050,7 @@
       callout = `<div class="callout warn" style="margin-bottom:16px">${I('users')}<div>El responsable <b>${esc(p.nombre)}</b> está inactivo. Gestione la devolución del equipo.</div></div>`;
     }
 
-    // Las 13 columnas de la planilla, en su orden
+    // Las 15 columnas de la planilla, en su orden
     const planilla = [
       ['RUT', `<span class="mono">${esc(e.rut || '—')}</span>${e.rut && !rutValid(e.rut) ? ' <span class="badge b-warn" title="El dígito verificador no corresponde">RUT no válido</span>' : ''}`],
       ['Nombre del trabajador', esc(e.nombre || '—')],
@@ -1063,8 +1063,10 @@
       ['Propiedad', esc(e.propiedad || '—')],
       ['Proveedor (arriendo)', esc(e.proveedor || '—')],
       ['Fecha arriendo', esc(fmtArriendo(e.fechaArriendo))],
-      ['Pantalla modelo', esc(e.pantallaModelo || '—')],
-      ['Pantalla (N° serie)', `<span class="mono">${esc(e.pantallaSerie || '—')}</span>`]
+      ['Monitor modelo', esc(e.pantallaModelo || '—')],
+      ['Monitor (N° serie)', `<span class="mono">${esc(e.pantallaSerie || '—')}</span>`],
+      ['Monitor adicional modelo', esc(e.monitor2Marca || '—')],
+      ['Monitor adicional (N° serie)', `<span class="mono">${esc(e.monitor2Serie || '—')}</span>`]
     ];
     const hist = D().movimientos.filter(m => m.equipoId === e.id).slice().reverse();
     el.innerHTML = `
@@ -1091,7 +1093,6 @@
               <div><dt>Fecha de alta</dt><dd>${fmtDate(e.fechaAlta)}</dd></div>
               <div><dt>Última actualización</dt><dd>${fmtDateTime(e.actualizado)}</dd></div>
               <div><dt>Estado</dt><dd>${esc(e.estado)}${e.reparacion ? ' · en servicio técnico' : ''}</dd></div>
-              ${e.monitor2Marca || e.monitor2Serie ? `<div><dt>Monitor adicional: marca</dt><dd>${esc(e.monitor2Marca || '—')}</dd></div><div><dt>Monitor adicional: serie</dt><dd class="mono">${esc(e.monitor2Serie || '—')}</dd></div>` : ''}
               <div style="grid-column:1/-1"><dt>Observaciones</dt><dd>${esc(e.observaciones || '—')}</dd></div>
             </dl></div>
           </section>
@@ -1571,7 +1572,7 @@
     el.innerHTML = `
       <div class="grid g-3">
         <section class="panel tool-card"><span class="ic">${I('upload')}</span><h3>Importar planilla de inventario</h3>
-          <p>Cargue la planilla «Catastro Nacional UIA Unificado» (.xlsx). Se leen todas las hojas regionales con sus 13 columnas; el estado se toma de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…) y se crean los funcionarios con RUT válido.</p>
+          <p>Cargue la planilla «Catastro Nacional UIA Unificado» (.xlsx). Se leen todas las hojas regionales con sus 15 columnas; el estado se toma de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…) y se crean los funcionarios con RUT válido.</p>
           <div class="page-actions"><button class="btn primary" id="b-import">Importar planilla</button><button class="btn" id="b-template">${I('download')}Plantilla</button></div></section>
         <section class="panel tool-card"><span class="ic">${I('download')}</span><h3>Exportar catastro completo</h3>
           <p>Genera la planilla oficial con todos los equipos (incluidas las bajas): hoja RESUMEN con sus fórmulas y una hoja por región, con el mismo formato, columnas y estilos.</p>
@@ -1648,7 +1649,7 @@
 
   /* ---------- Importación de la planilla ---------- */
   // Lee todas las hojas regionales (la hoja RESUMEN se omite). Cada fila es un equipo: se guardan sus
-  // 13 columnas tal como vienen y el estado se deduce de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…).
+  // 15 columnas tal como vienen y el estado se deduce de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…).
   function analyzeImport(sheets, opts) {
     const lect = Planilla.interpretar(sheets);
     const res = { nuevos: [], actualizar: [], errores: [], avisos: [], personas: [], total: lect.filas.length, hojas: lect.hojas, estados: { Asignado: 0, Disponible: 0, Baja: 0, reparacion: 0 } };
@@ -1711,6 +1712,8 @@
         rut: d.rut || '', nombre: d.nombre || '', region, oficina: d.oficina || '', marca: d.marca || '', modelo: d.modelo || '',
         formato: d.formato || '', serie, propiedad: d.propiedad || '', proveedor: d.proveedor || '', fechaArriendo: d.fechaArriendo || '',
         pantallaModelo: d.pantallaModelo || '', pantallaSerie: d.pantallaSerie || '', serieNum: !!f.serieNum, fechaTxt: !!f.fechaTxt,
+        // El monitor adicional solo se toma si la planilla trae esas columnas: una planilla anterior no lo borra al actualizar
+        ...('monitor2Marca' in d ? { monitor2Marca: d.monitor2Marca } : {}), ...('monitor2Serie' in d ? { monitor2Serie: d.monitor2Serie } : {}),
         estado: est.estado, personaId: personaRef ? personaRef.id : '',
         reparacion: est.reparacion ? { desde: nowStamp(), falla: 'Registrado en servicio técnico en la planilla.' } : null
       };
