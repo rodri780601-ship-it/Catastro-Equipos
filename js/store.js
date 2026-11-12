@@ -40,12 +40,14 @@ const TIPOS_V1 = { 'AIO': 'AIO', 'Desktop': 'DESKTOP', 'Computador de escritorio
 const NOMBRE_DISPONIBLE = 'DISPONIBLE';
 const NOMBRE_BAJA = 'BAJA';
 const NOMBRE_REPARACION = 'SERVICIO TÉCNICO';
+const NOMBRE_TERMINO = 'TÉRMINO DE CONTRATO';
 
 // Estado del equipo según lo escrito en NOMBRE DEL TRABAJADOR (al importar la planilla)
 function estadoDesdeNombre(nombre) {
   const n = String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!n) return { estado: 'Disponible' };
   if (n === 'baja' || /^(dado de )?baja\b/.test(n)) return { estado: 'Baja' };
+  if (/^(termino|fin) (de |del )?(contrato|arriendo)\b/.test(n)) return { estado: ESTADO_TERMINO };
   if (/^(servicio tecnico|en reparacion|reparacion)\b/.test(n)) return { estado: 'Disponible', reparacion: true };
   if (/^(disponi|bodega|stock|reasignar|sin usuario|sin asignar|por asignar|libre)/.test(n)) return { estado: 'Disponible' };
   return { estado: 'Asignado' };
@@ -63,7 +65,17 @@ const UNIDADES = [
 ];
 
 // La reparación no es un estado: un equipo Disponible puede estar en servicio técnico (campo `reparacion`)
-const ESTADOS = ['Asignado', 'Disponible', 'Baja'];
+// "Término de contrato": equipo en arriendo devuelto al proveedor; como la baja, deja de estar vigente
+const ESTADO_TERMINO = 'Término de contrato';
+const ESTADOS = ['Asignado', 'Disponible', 'Baja', ESTADO_TERMINO];
+const vigente = e => e.estado !== 'Baja' && e.estado !== ESTADO_TERMINO;
+
+const MOTIVOS_TERMINO = [
+  'Vencimiento del contrato',
+  'Término anticipado del contrato',
+  'Reemplazo por el proveedor',
+  'Otro'
+];
 
 const MOTIVOS_BAJA = [
   'Obsolescencia técnica',

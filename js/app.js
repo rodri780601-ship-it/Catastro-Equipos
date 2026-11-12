@@ -108,11 +108,18 @@
 
   /* ---------- Badges ---------- */
   function estadoBadge(e) {
-    const map = { 'Asignado': 'b-ok', 'Disponible': 'b-info', 'Baja': 'b-neutral' };
+    const map = { 'Asignado': 'b-ok', 'Disponible': 'b-info', 'Baja': 'b-neutral', [ESTADO_TERMINO]: 'b-lease' };
     return `<span class="badge ${map[e.estado] || 'b-neutral'}"><span class="dot"></span>${esc(e.estado)}</span>` +
       (e.reparacion ? ` <span class="badge b-warn" title="En reparación desde el ${fmtDate(e.reparacion.desde)}">En servicio técnico</span>` : '') +
-      (e.solicitudBaja ? ` <span class="badge b-danger" title="Solicitud de baja pendiente">Baja solicitada</span>` : '');
+      (e.solicitudBaja ? ` <span class="badge b-danger" title="Solicitud pendiente de aprobación">${esc(solicitadoTxt(e.solicitudBaja))}</span>` : '');
   }
+
+  /* ---------- Tipos de solicitud ---------- */
+  // e.solicitudBaja guarda la solicitud pendiente del equipo, sea de baja o de término de contrato
+  const tipoSol = s => (s && s.tipo) || 'Baja';
+  const esTermino = s => tipoSol(s) === ESTADO_TERMINO;
+  const tipoTxt = s => esTermino(s) ? 'término de contrato' : 'baja';
+  const solicitadoTxt = s => esTermino(s) ? 'Término de contrato solicitado' : 'Baja solicitada';
   function propBadge(e) {
     const n = norm(e.propiedad);
     if (n === 'arriendo') return '<span class="badge b-lease">ARRIENDO</span>';
@@ -483,8 +490,9 @@
   function renderPanel(el) {
     setTitle('Panel', isAdmin() ? 'Vista nacional' : 'Región ' + regionName(me.region));
     const all = D().equipos.filter(inScope);
-    const vig = all.filter(e => e.estado !== 'Baja');
+    const vig = all.filter(vigente);
     const count = s => vig.filter(e => e.estado === s).length;
+    const terminados = all.filter(e => e.estado === ESTADO_TERMINO).length;
     const arr = vig.filter(esArriendo).length;
     const year = todayISO().slice(0, 4);
     const bajasAno = all.filter(e => e.estado === 'Baja' && (e.fechaBaja || '').startsWith(year)).length;
@@ -517,9 +525,11 @@
 
     // Alertas
     const alerts = [];
-    respuestasNuevas().forEach(s => alerts.push({ cls: s.estado === 'Aprobada' ? 'info' : 'danger', icon: 'inbox', title: `Su solicitud de baja de ${s.inventario} fue ${s.estado.toLowerCase()}`, text: `Respondida por ${s.resolucion.usuario} el ${fmtDateTime(s.resolucion.fecha)}. Vea el detalle en Solicitudes.`, href: '#/solicitudes' }));
-    const pend = all.filter(e => e.solicitudBaja);
-    if (pend.length) alerts.push({ cls: 'danger', icon: 'trash', title: `${plural(pend.length, 'solicitud', 'solicitudes')} de baja pendiente${pend.length === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/solicitudes' });
+    respuestasNuevas().forEach(s => alerts.push({ cls: s.estado === 'Aprobada' ? 'info' : 'danger', icon: 'inbox', title: `Su solicitud de ${tipoTxt(s)} de ${s.inventario} fue ${s.estado.toLowerCase()}`, text: `Respondida por ${s.resolucion.usuario} el ${fmtDateTime(s.resolucion.fecha)}. Vea el detalle en Solicitudes.`, href: '#/solicitudes' }));
+    [['Baja', 'trash', 'danger'], [ESTADO_TERMINO, 'file', 'warn']].forEach(([tipo, icon, cls]) => {
+      const n = all.filter(e => e.solicitudBaja && tipoSol(e.solicitudBaja) === tipo).length;
+      if (n) alerts.push({ cls, icon, title: `${plural(n, 'solicitud', 'solicitudes')} de ${tipo === 'Baja' ? 'baja' : 'término de contrato'} pendiente${n === 1 ? '' : 's'}`, text: isAdmin() ? 'Requieren revisión y aprobación del administrador.' : 'En espera de aprobación del administrador.', href: '#/solicitudes' });
+    });
     D().contratos.forEach(c => {
       const st = contratoStatus(c);
       const n = vig.filter(e => contratoDe(e) === c).length;
@@ -543,12 +553,13 @@
 
     el.innerHTML = `${vacio}
       <div class="kpis">
-        ${kpi('Equipos vigentes', vig.length, `${plural(all.length - vig.length, 'dado', 'dados')} de baja en total`, 'var(--primary)', '#/equipos?estado=vigentes')}
+        ${kpi('Equipos vigentes', vig.length, terminados ? `${(all.length - vig.length - terminados).toLocaleString('es-CL')} de baja · ${terminados.toLocaleString('es-CL')} por término` : `${plural(all.length - vig.length, 'dado', 'dados')} de baja en total`, 'var(--primary)', '#/equipos?estado=vigentes')}
         ${kpi('Asignados', count('Asignado'), `${pct(count('Asignado'))}% del parque vigente`, 'var(--ok)', '#/equipos?estado=Asignado')}
         ${kpi('Disponibles', count('Disponible'), `${count('Disponible') - rep.length} listos para asignar`, 'var(--info)', '#/equipos?estado=Disponible')}
         ${kpi('En servicio técnico', rep.length, 'Disponibles en reparación', 'var(--warn)', '#/equipos?estado=reparacion')}
         ${kpi('En arriendo', arr, `${pct(arr)}% · ${vig.length - arr} CONAF u otra propiedad`, 'var(--lease)', '#/equipos?propiedad=ARRIENDO')}
         ${kpi('Bajas ' + year, bajasAno, 'Dados de baja este año', 'var(--neutral)', '#/equipos?estado=Baja')}
+        ${kpi('Término de contrato', terminados, 'Devueltos al proveedor', 'var(--lease)', '#/equipos?estado=' + encodeURIComponent(ESTADO_TERMINO))}
       </div>
       <div class="grid g-dash">
         <div class="grid">
@@ -576,7 +587,7 @@
   }
 
   function tlColor(tipo) {
-    return ({ 'Alta': 'var(--primary)', 'Asignación': 'var(--ok)', 'Devolución': 'var(--info)', 'Reparación': 'var(--warn)', 'Retorno de reparación': 'var(--info)', 'Solicitud de baja': 'var(--danger)', 'Baja': 'var(--neutral)', 'Traslado': 'var(--accent)', 'Reactivación': 'var(--primary)' })[tipo] || '#9aa59e';
+    return ({ 'Alta': 'var(--primary)', 'Asignación': 'var(--ok)', 'Devolución': 'var(--info)', 'Reparación': 'var(--warn)', 'Retorno de reparación': 'var(--info)', 'Solicitud de baja': 'var(--danger)', 'Baja': 'var(--neutral)', 'Solicitud de término de contrato': 'var(--lease)', [ESTADO_TERMINO]: 'var(--lease)', 'Reversión de término': 'var(--primary)', 'Traslado': 'var(--accent)', 'Reactivación': 'var(--primary)' })[tipo] || '#9aa59e';
   }
 
   /* =====================================================
@@ -605,7 +616,7 @@
     if (f.propiedad === OTRA_PROPIEDAD) list = list.filter(e => !PROPIEDADES.some(x => norm(x) === norm(e.propiedad)));
     else if (f.propiedad) list = list.filter(e => norm(e.propiedad) === norm(f.propiedad));
     if (f.contrato) list = list.filter(e => { const c = contratoDe(e); return c && c.id === f.contrato; });
-    if (f.estado === 'vigentes') list = list.filter(e => e.estado !== 'Baja');
+    if (f.estado === 'vigentes') list = list.filter(vigente);
     else if (f.estado === 'reparacion') list = list.filter(e => e.reparacion);
     else if (f.estado === 'solicitud') list = list.filter(e => e.solicitudBaja);
     else if (f.estado === 'inactivos') list = list.filter(e => e.estado === 'Asignado' && persona(e.personaId) && !persona(e.personaId).activo);
@@ -634,7 +645,7 @@
     const f = eqState;
     const estadoOpts = [['todos', 'Todos los estados'], ...ESTADOS.map(s => [s, s])];
     // Vistas que se abren desde el Panel: aparecen en la lista solo mientras están activas
-    const vistas = { vigentes: 'Vigentes (sin bajas)', reparacion: 'En servicio técnico', solicitud: 'Con solicitud de baja', inactivos: 'Asignados a inactivos' };
+    const vistas = { vigentes: 'Vigentes (sin bajas ni términos)', reparacion: 'En servicio técnico', solicitud: 'Con solicitud pendiente', inactivos: 'Asignados a inactivos' };
     if (vistas[f.estado]) estadoOpts.push([f.estado, vistas[f.estado]]);
     // Formatos del catálogo y los que vienen de la planilla
     const enUso = D().equipos.filter(inScope);
@@ -645,6 +656,7 @@
           <button class="btn primary" id="btn-alta">${I('plus')}Ingresar Equipo</button>
           ${isAdmin() ? `<button class="btn" id="btn-import">${I('upload')}Importar planilla</button>` : ''}
           <button class="btn" id="btn-export" title="Descarga los equipos filtrados en el formato de la planilla Catastro Nacional">${I('download')}Exportar planilla</button>
+          ${isAdmin() && enUso.some(e => e.estado === ESTADO_TERMINO) ? `<button class="btn danger" id="btn-purgar" title="Elimina del inventario los equipos devueltos al proveedor">${I('trash')}Eliminar equipos con término de contrato</button>` : ''}
         </div>
       </div>
       <div class="filters">
@@ -671,6 +683,7 @@
       descargarPlanilla(list);
     });
     if ($('#btn-import')) $('#btn-import').addEventListener('click', importEquiposModal);
+    if ($('#btn-purgar')) $('#btn-purgar').addEventListener('click', purgarTerminados);
     drawEquiposTable();
   }
 
@@ -965,7 +978,7 @@
 
   function bajaModal(e) {
     const direct = isAdmin();
-    const sol = e.solicitudBaja;
+    const sol = e.solicitudBaja && !esTermino(e.solicitudBaja) ? e.solicitudBaja : null;
     openModal({
       title: direct ? (sol ? 'Aprobar baja' : 'Dar de baja') : 'Solicitar baja',
       submitLabel: direct ? 'Confirmar baja' : 'Enviar solicitud', submitClass: 'danger',
@@ -998,9 +1011,77 @@
     });
   }
 
+  // Término de contrato: equipo en arriendo devuelto al proveedor. El administrador lo registra directo;
+  // el usuario regional lo solicita y queda pendiente hasta que el administrador lo apruebe.
+  function terminoModal(e) {
+    const direct = isAdmin();
+    const sol = e.solicitudBaja && esTermino(e.solicitudBaja) ? e.solicitudBaja : null;
+    const c = contratoDe(e);
+    openModal({
+      title: direct ? (sol ? 'Aprobar término de contrato' : 'Término de contrato') : 'Solicitar término de contrato',
+      submitLabel: direct ? 'Confirmar término' : 'Enviar solicitud', submitClass: 'danger',
+      body: `${eqSummary(e)}
+        ${direct ? `<div class="callout danger">${I('alert')}<div>El equipo se devuelve al proveedor${e.proveedor ? ' <b>' + esc(e.proveedor) + '</b>' : ''}${c ? ' (contrato ' + esc(c.codigo) + ')' : ''}: dejará de estar vigente y en la planilla figurará como «${NOMBRE_TERMINO}». ${responsable(e) ? 'Se registrará además su devolución.' : ''}</div></div>`
+          : `<div class="callout info">${I('shield')}<div>El término de contrato debe ser autorizado por el administrador general. Mientras tanto el equipo sigue vigente.</div></div>`}
+        <div class="form-grid">
+          <label class="field"><span>Motivo <span class="req">*</span></span><select name="motivo">${opt('', 'Seleccione…', '')}${MOTIVOS_TERMINO.map(m => opt(m, m, sol ? sol.motivo : (c && contratoStatus(c).left < 0 ? 'Vencimiento del contrato' : ''))).join('')}</select></label>
+          ${direct ? `<label class="field"><span>Fecha de devolución <span class="req">*</span></span><input type="date" name="fecha" value="${todayISO()}" max="${todayISO()}"></label>` : '<div></div>'}
+          <label class="field full"><span>Detalle / respaldo ${direct ? '(acta de devolución, guía de retiro)' : ''}</span><textarea name="detalle" rows="3">${esc(sol ? sol.detalle : '')}</textarea></label>
+        </div>`,
+      onSubmit: (fd, form) => {
+        if (!fd.motivo) return fieldError(form, 'motivo', 'Seleccione el motivo.');
+        if (direct) {
+          if (!fd.fecha) return fieldError(form, 'fecha', 'Ingrese la fecha de devolución.');
+          const r = responsable(e);
+          if (r) log(e, 'Devolución', `Devuelto por ${r.nombre} por término de contrato.`);
+          if (sol) resolverSolicitud(e, 'Aprobada', `Término de contrato registrado con fecha ${fmtDate(fd.fecha)}.${fd.detalle ? ' ' + fd.detalle : ''}`);
+          setResponsable(e, null, NOMBRE_TERMINO);
+          Object.assign(e, { estado: ESTADO_TERMINO, fechaAsignacion: '', termino: { fecha: fd.fecha, motivo: fd.motivo, detalle: fd.detalle }, solicitudBaja: null, reparacion: null });
+          log(e, ESTADO_TERMINO, `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}${sol ? ` (solicitado por ${sol.usuario})` : ''}`);
+          toast(`Término de contrato registrado para ${e.serie || e.inventario}.`);
+        } else {
+          registrarSolicitud(e, { tipo: ESTADO_TERMINO, motivo: fd.motivo, detalle: fd.detalle, fecha: nowStamp(), usuario: me.name, usuarioId: me.id });
+          log(e, 'Solicitud de término de contrato', `${fd.motivo}.${fd.detalle ? ' ' + fd.detalle : ''}`);
+          toast('Solicitud enviada al administrador general. Puede seguirla en Solicitudes.');
+        }
+        save(); route();
+      }
+    });
+  }
+
+  // [Solo administrador] Los equipos devueltos al proveedor no se conservan en el inventario: se eliminan
+  // junto con su historial y sus solicitudes. Antes se ofrece descargar un respaldo.
+  function purgarTerminados() {
+    const lista = D().equipos.filter(e => e.estado === ESTADO_TERMINO);
+    if (!lista.length) return toast('No hay equipos con término de contrato.', 'warn');
+    const porRegion = {};
+    lista.forEach(e => { porRegion[e.region] = (porRegion[e.region] || 0) + 1; });
+    const detalle = Object.entries(porRegion).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${esc(regionName(r))}: ${n}`).join(' · ');
+    openModal({
+      title: 'Eliminar equipos con término de contrato', submitLabel: `Eliminar ${plural(lista.length, 'equipo')}`, submitClass: 'danger',
+      body: `<div class="callout danger">${I('alert')}<div>Se eliminarán del inventario <b>${plural(lista.length, 'equipo')}</b> devuelto${lista.length === 1 ? '' : 's'} al proveedor, con su historial de movimientos y sus solicitudes. Esta acción no se puede deshacer.</div></div>
+        <p class="muted" style="margin:0;font-size:13.5px">${detalle}</p>
+        <label class="check"><input type="checkbox" name="respaldo" value="1" checked> Descargar antes un respaldo con toda la información actual</label>`,
+      onSubmit: fd => {
+        if (fd.respaldo) downloadBlob(JSON.stringify(D(), null, 1), `respaldo_catastro_${todayISO()}.json`, 'application/json');
+        const ids = new Set(lista.map(e => e.id));
+        const d = D();
+        d.equipos = d.equipos.filter(e => !ids.has(e.id));
+        d.movimientos = d.movimientos.filter(m => !ids.has(m.equipoId));
+        d.solicitudes = SOL().filter(s => !ids.has(s.equipoId));
+        save(); toast(`Se eliminaron ${plural(lista.length, 'equipo')} con término de contrato.`);
+        if (eqState.estado === ESTADO_TERMINO) eqState.estado = 'todos';
+        setTimeout(route, 0);
+      }
+    });
+  }
+
+  // Aprueba la solicitud pendiente del equipo con la ventana que corresponde a su tipo
+  const aprobarSolicitud = e => esTermino(e.solicitudBaja) ? terminoModal(e) : bajaModal(e);
+
   function rechazarBajaModal(e) {
     openModal({
-      title: 'Rechazar solicitud de baja', submitLabel: 'Rechazar solicitud', size: 'sm',
+      title: `Rechazar solicitud de ${tipoTxt(e.solicitudBaja)}`, submitLabel: 'Rechazar solicitud', size: 'sm',
       body: `${eqSummary(e)}<label class="field"><span>Motivo del rechazo <span class="req">*</span></span><textarea name="obs" rows="3"></textarea></label>`,
       onSubmit: (fd, form) => {
         if (!fd.obs) return fieldError(form, 'obs', 'Indique el motivo del rechazo.');
@@ -1023,23 +1104,30 @@
     }
     setTitle('Ficha de equipo', e.serie || e.inventario);
     const r = responsable(e), p = r && r.persona, c = contratoDe(e);
-    const baja = e.estado === 'Baja';
+    const baja = e.estado === 'Baja', terminado = e.estado === ESTADO_TERMINO;
     const btn = (act, icon, label, cls = '') => `<button class="btn ${cls}" data-act="${act}">${I(icon)}${label}</button>`;
     const acts = [];
-    if (!baja) {
+    if (terminado) { if (isAdmin()) acts.push(btn('editar', 'edit', 'Editar'), btn('revertir-termino', 'refresh', 'Revertir término')); }
+    else if (!baja) {
       if (e.estado === 'Disponible' && !e.reparacion) acts.push(btn('asignar', 'assign', 'Asignar', 'primary'));
       if (e.estado === 'Asignado') acts.push(btn('devolver', 'undo', 'Registrar devolución', 'primary'), btn('asignar', 'assign', 'Reasignar'), btn('acta', 'printer', 'Acta de entrega'));
       if (e.reparacion) acts.push(btn('retorno', 'check', 'Retorno de reparación', 'primary'));
       else acts.push(btn('reparar', 'wrench', 'Enviar a reparación'));
       acts.push(btn('editar', 'edit', 'Editar'));
-      if (!e.solicitudBaja) acts.push(btn('baja', 'trash', isAdmin() ? 'Dar de baja' : 'Solicitar baja'));
+      if (!e.solicitudBaja) {
+        if (esArriendo(e)) acts.push(btn('termino', 'file', isAdmin() ? 'Término de contrato' : 'Solicitar término de contrato'));
+        acts.push(btn('baja', 'trash', isAdmin() ? 'Dar de baja' : 'Solicitar baja'));
+      }
     } else if (isAdmin()) acts.push(btn('editar', 'edit', 'Editar'), btn('reactivar', 'refresh', 'Revertir baja'));
 
     let callout = '';
     if (e.solicitudBaja) {
       const s = e.solicitudBaja;
-      callout = `<div class="callout danger" style="margin-bottom:16px">${I('alert')}<div class="grow"><b>Baja solicitada</b> por ${esc(s.usuario)} el ${fmtDateTime(s.fecha)} · ${esc(s.motivo)}${s.detalle ? '<br>' + esc(s.detalle) : ''}</div>
-        ${isAdmin() ? `<div class="page-actions"><button class="btn sm danger" data-act="aprobar">Aprobar baja</button><button class="btn sm" data-act="rechazar">Rechazar</button></div>` : `<button class="btn sm" data-act="cancelar-sol">Retirar solicitud</button>`}</div>`;
+      callout = `<div class="callout danger" style="margin-bottom:16px">${I('alert')}<div class="grow"><b>${esc(solicitadoTxt(s))}</b> por ${esc(s.usuario)} el ${fmtDateTime(s.fecha)} · ${esc(s.motivo)}${s.detalle ? '<br>' + esc(s.detalle) : ''}${esTermino(s) && !isAdmin() ? '<br>Pendiente de autorización del administrador general.' : ''}</div>
+        ${isAdmin() ? `<div class="page-actions"><button class="btn sm danger" data-act="aprobar">${esTermino(s) ? 'Aprobar término' : 'Aprobar baja'}</button><button class="btn sm" data-act="rechazar">Rechazar</button></div>` : `<button class="btn sm" data-act="cancelar-sol">Retirar solicitud</button>`}</div>`;
+    } else if (terminado) {
+      const t = e.termino || {};
+      callout = `<div class="callout" style="background:var(--accent-50);margin-bottom:16px">${I('file')}<div><b>Término de contrato</b>${t.fecha ? ' el ' + fmtDate(t.fecha) : ''}${t.motivo ? ' · ' + esc(t.motivo) : ''}${t.detalle ? '<br>' + esc(t.detalle) : ''}<br>Equipo devuelto al proveedor; ya no está vigente.</div></div>`;
     } else if (baja) {
       callout = `<div class="callout" style="background:var(--neutral-bg);margin-bottom:16px">${I('trash')}<div><b>Dado de baja</b>${e.fechaBaja ? ' el ' + fmtDate(e.fechaBaja) : ''}${e.motivoBaja ? ' · ' + esc(e.motivoBaja) : ''}${e.detalleBaja ? '<br>' + esc(e.detalleBaja) : ''}</div></div>`;
     } else if (e.reparacion) {
@@ -1114,7 +1202,7 @@
               ${e.fechaAsignacion ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">Asignado desde el ${fmtDate(e.fechaAsignacion)}</p>` : ''}`
               : r ? `<div class="holder"><span class="avatar">${initials(r.nombre)}</span><div><strong>${esc(r.nombre)}</strong><div class="muted mono" style="font-size:13.5px">${esc(r.rut || 'sin RUT')}</div></div></div>
               <p class="muted" style="margin:12px 0 0;font-size:13.5px">Asignado según la planilla, sin ficha de funcionario${r.rut && !rutValid(r.rut) ? ' (el RUT no es válido)' : ''}.</p>`
-              : `<span class="muted">${baja ? 'Equipo dado de baja.' : e.reparacion ? 'En servicio técnico.' : 'Sin asignar.'}</span>`}</div>
+              : `<span class="muted">${baja ? 'Equipo dado de baja.' : terminado ? 'Devuelto al proveedor por término de contrato.' : e.reparacion ? 'En servicio técnico.' : 'Sin asignar.'}</span>`}</div>
           </section>
           <section class="panel">
             <div class="panel-head"><h3>Historial</h3><span class="muted" style="font-size:13px">${plural(hist.length, 'registro')}</span></div>
@@ -1126,7 +1214,8 @@
     const handlers = {
       asignar: () => asignarModal(e), devolver: () => devolverModal(e), acta: () => printActa(e.personaId, [e.id]),
       reparar: () => reparacionModal(e, false), retorno: () => reparacionModal(e, true), editar: () => equipoForm(e),
-      baja: () => bajaModal(e), aprobar: () => bajaModal(e), rechazar: () => rechazarBajaModal(e),
+      baja: () => bajaModal(e), termino: () => terminoModal(e), aprobar: () => aprobarSolicitud(e), rechazar: () => rechazarBajaModal(e),
+      'revertir-termino': () => confirmDialog({ title: 'Revertir término de contrato', message: `El equipo <b>${esc(e.serie || e.inventario)}</b> volverá a estar vigente con estado <b>Disponible</b> («${NOMBRE_DISPONIBLE}» en la planilla).`, confirmLabel: 'Revertir término', onConfirm: () => { Object.assign(e, { estado: 'Disponible', termino: null }); setResponsable(e, null, NOMBRE_DISPONIBLE); log(e, 'Reversión de término', 'Se revierte el término de contrato del equipo.'); save(); toast('Término de contrato revertido.'); route(); } }),
       'cancelar-sol': () => retirarSolicitud(e),
       reactivar: () => confirmDialog({ title: 'Revertir baja', message: `El equipo <b>${esc(e.serie || e.inventario)}</b> volverá a estar vigente con estado <b>Disponible</b> («${NOMBRE_DISPONIBLE}» en la planilla).`, confirmLabel: 'Revertir baja', onConfirm: () => { Object.assign(e, { estado: 'Disponible', fechaBaja: '', motivoBaja: '', detalleBaja: '' }); setResponsable(e, null, NOMBRE_DISPONIBLE); log(e, 'Reactivación', 'Se revierte la baja del equipo.'); save(); toast('Baja revertida.'); route(); } })
     };
@@ -1134,14 +1223,15 @@
   }
 
   function retirarSolicitud(e) {
-    confirmDialog({ title: 'Retirar solicitud de baja', message: '¿Desea retirar la solicitud de baja de este equipo?', confirmLabel: 'Retirar solicitud', onConfirm: () => { resolverSolicitud(e, 'Retirada', 'Retirada por el solicitante.'); log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } });
+    const t = tipoTxt(e.solicitudBaja);
+    confirmDialog({ title: `Retirar solicitud de ${t}`, message: `¿Desea retirar la solicitud de ${t} de este equipo?`, confirmLabel: 'Retirar solicitud', onConfirm: () => { resolverSolicitud(e, 'Retirada', 'Retirada por el solicitante.'); log(e, 'Solicitud rechazada', 'Solicitud retirada por el usuario solicitante.'); save(); toast('Solicitud retirada.'); route(); } });
   }
 
   /* =====================================================
      SOLICITUDES
      ===================================================== */
   // Cada solicitud queda registrada con su estado y respuesta, para el seguimiento del solicitante.
-  // Hoy solo hay solicitudes de baja; otros tipos se suman aquí con su propio "tipo".
+  // Tipos: "Baja" y "Término de contrato" (el tipo viaja en la solicitud y en e.solicitudBaja).
   function SOL() {
     const d = D();
     if (!Array.isArray(d.solicitudes)) {
@@ -1154,9 +1244,9 @@
   }
 
   function registrarSolicitud(e, datos) {
-    const s = { id: Store.uid('s'), tipo: 'Baja', equipoId: e.id, inventario: e.inventario, region: e.region, motivo: datos.motivo, detalle: datos.detalle || '', fecha: datos.fecha, usuario: datos.usuario, usuarioId: datos.usuarioId, estado: 'Pendiente', resolucion: null, visto: true };
+    const s = { id: Store.uid('s'), tipo: tipoSol(datos), equipoId: e.id, inventario: e.inventario, region: e.region, motivo: datos.motivo, detalle: datos.detalle || '', fecha: datos.fecha, usuario: datos.usuario, usuarioId: datos.usuarioId, estado: 'Pendiente', resolucion: null, visto: true };
     SOL().push(s);
-    e.solicitudBaja = Object.assign({}, datos, { id: s.id });
+    e.solicitudBaja = Object.assign({}, datos, { id: s.id, tipo: s.tipo });
     return s;
   }
 
@@ -1210,7 +1300,7 @@
           const e = s.equipo;
           const dias = daysBetween(s.fecha.slice(0, 10), todayISO());
           return `<tr class="clickable" data-id="${e.id}">
-            <td><span class="badge b-danger">${esc(s.tipo)}</span></td>
+            <td><span class="badge ${esTermino(s) ? 'b-lease' : 'b-danger'}">${esc(s.tipo)}</span></td>
             <td class="nowrap"><strong class="mono">${esc(e.serie || e.inventario)}</strong><span class="sub">${esc(descEquipo(e))}</span></td>
             ${isAdmin() ? `<td class="hide-sm nowrap">${esc(regionName(e.region))}</td>` : ''}
             <td>${esc(s.motivo)}${s.detalle ? `<span class="sub" title="${esc(s.detalle)}">${esc(s.detalle)}</span>` : ''}</td>
@@ -1223,7 +1313,7 @@
       if (ev.target.closest('button')) return;
       location.hash = '#/equipo/' + tr.dataset.id;
     }));
-    $$('[data-aprobar]', el).forEach(b => b.addEventListener('click', () => bajaModal(equipo(b.dataset.aprobar))));
+    $$('[data-aprobar]', el).forEach(b => b.addEventListener('click', () => aprobarSolicitud(equipo(b.dataset.aprobar))));
     $$('[data-rechazar]', el).forEach(b => b.addEventListener('click', () => rechazarBajaModal(equipo(b.dataset.rechazar))));
   }
 
@@ -1243,7 +1333,7 @@
         ? `<div class="callout ${s.estado === 'Aprobada' ? 'info' : 'danger'}">${I(s.estado === 'Aprobada' ? 'check' : 'alert')}<div><b>Respuesta del administrador:</b> ${esc(r.comentario)}</div></div>` : '';
       return `<article class="panel req-card${nuevas.has(s.id) ? ' is-new' : ''}">
         <div class="req-head">
-          <div><span class="badge b-danger">${esc(s.tipo)}</span> <a class="mono" href="#/equipo/${esc(s.equipoId)}"><strong>${esc(s.inventario)}</strong></a>${e ? ` <span class="muted">${esc(descEquipo(e))}${e.serie ? ' · S/N ' + esc(e.serie) : ''}</span>` : ''}</div>
+          <div><span class="badge ${esTermino(s) ? 'b-lease' : 'b-danger'}">${esc(s.tipo)}</span> <a class="mono" href="#/equipo/${esc(s.equipoId)}"><strong>${esc(s.inventario)}</strong></a>${e ? ` <span class="muted">${esc(descEquipo(e))}${e.serie ? ' · S/N ' + esc(e.serie) : ''}</span>` : ''}</div>
           <div>${nuevas.has(s.id) ? '<span class="badge b-info">Respuesta nueva</span> ' : ''}${solEstadoBadge(s)}</div>
         </div>
         <p class="req-motivo"><b>${esc(s.motivo)}</b>${s.detalle ? ' · ' + esc(s.detalle) : ''}</p>
@@ -1411,7 +1501,7 @@
       <div class="contracts">${list.map(c => {
         const st = contratoStatus(c);
         const eqs = D().equipos.filter(e => inScope(e) && contratoDe(e) === c);
-        const vig = eqs.filter(e => e.estado !== 'Baja');
+        const vig = eqs.filter(vigente);
         const total = Math.max(1, daysBetween(c.fechaInicio, c.fechaTermino));
         const elapsed = Math.min(100, Math.max(0, daysBetween(c.fechaInicio, todayISO()) / total * 100));
         return `<section class="panel contract">
@@ -1652,7 +1742,7 @@
   // 15 columnas tal como vienen y el estado se deduce de NOMBRE DEL TRABAJADOR (BAJA, DISPONIBLE, BODEGA…).
   function analyzeImport(sheets, opts) {
     const lect = Planilla.interpretar(sheets);
-    const res = { nuevos: [], actualizar: [], errores: [], avisos: [], personas: [], total: lect.filas.length, hojas: lect.hojas, estados: { Asignado: 0, Disponible: 0, Baja: 0, reparacion: 0 } };
+    const res = { nuevos: [], actualizar: [], errores: [], avisos: [], personas: [], total: lect.filas.length, hojas: lect.hojas, estados: { Asignado: 0, Disponible: 0, Baja: 0, [ESTADO_TERMINO]: 0, reparacion: 0 } };
     if (lect.sinEncabezado.length) res.avisos.push(`${plural(lect.sinEncabezado.length, 'hoja')} sin la fila de encabezados de la planilla (se omite${lect.sinEncabezado.length === 1 ? '' : 'n'}): ${lect.sinEncabezado.join(', ')}.`);
     if (!lect.hojas.length) {
       res.errores.push('No se encontró la fila de encabezados (RUT, NOMBRE DEL TRABAJADOR, REGION, OFICINA, MARCA PC, MODELO PC, FORMATO, NUMERO DE SERIE, PROPIEDAD…) en ninguna hoja. Use la plantilla.');
@@ -1783,6 +1873,7 @@
         res.nuevos.forEach(it => {
           const e = Object.assign({ id: Store.uid('e'), inventario: it.inventario, orden: nextOrden(), contratoId: '', fechaAlta: hoy, fechaAsignacion: '', fechaBaja: '', motivoBaja: '', detalleBaja: '', solicitudBaja: null, observaciones: '' }, it.data);
           if (e.estado === 'Baja') { e.motivoBaja = 'Registrada en la planilla'; e.detalleBaja = `Figura como «${e.nombre}» en ${fileName}.`; }
+          if (e.estado === ESTADO_TERMINO) e.termino = { fecha: '', motivo: 'Registrado en la planilla', detalle: `Figura como «${e.nombre}» en ${fileName}.` };
           D().equipos.push(e);
           log(e, 'Alta', `Importado desde ${fileName} (${it.ref}).${e.estado === 'Asignado' ? ' Asignado a ' + (e.nombre || 'responsable') + (e.rut ? ' (' + e.rut + ')' : '') + '.' : ' Figura como «' + (e.nombre || 'sin nombre') + '».'}`);
         });
@@ -1792,6 +1883,8 @@
           Object.assign(e, it.data);
           if (e.estado === 'Baja' && antes !== 'Baja') { e.fechaBaja = hoy; e.motivoBaja = 'Registrada en la planilla'; e.solicitudBaja = null; }
           if (e.estado !== 'Baja') { e.fechaBaja = ''; e.motivoBaja = ''; e.detalleBaja = ''; }
+          if (e.estado === ESTADO_TERMINO && antes !== ESTADO_TERMINO) { e.termino = { fecha: hoy, motivo: 'Registrado en la planilla', detalle: '' }; e.solicitudBaja = null; }
+          if (e.estado !== ESTADO_TERMINO) e.termino = null;
           log(e, 'Modificación', `Actualizado desde ${fileName} (${it.ref}).`);
         });
         // El próximo correlativo sugerido queda después del mayor CONAF-##### registrado
@@ -1819,7 +1912,7 @@
           <div><b>${res.personas.length.toLocaleString('es-CL')}</b><span>funcionarios nuevos</span></div>
           <div><b style="color:${res.errores.length ? 'var(--danger)' : 'inherit'}">${res.errores.length}</b><span>filas omitidas</span></div>
         </div>
-        <p class="muted" style="font-size:13px;margin:10px 0 0">Estados según NOMBRE DEL TRABAJADOR: ${e.Asignado.toLocaleString('es-CL')} asignados · ${e.Disponible.toLocaleString('es-CL')} disponibles${e.reparacion ? ` (${e.reparacion} en servicio técnico)` : ''} · ${e.Baja.toLocaleString('es-CL')} de baja.</p>
+        <p class="muted" style="font-size:13px;margin:10px 0 0">Estados según NOMBRE DEL TRABAJADOR: ${e.Asignado.toLocaleString('es-CL')} asignados · ${e.Disponible.toLocaleString('es-CL')} disponibles${e.reparacion ? ` (${e.reparacion} en servicio técnico)` : ''} · ${e.Baja.toLocaleString('es-CL')} de baja${e[ESTADO_TERMINO] ? ` · ${e[ESTADO_TERMINO].toLocaleString('es-CL')} por término de contrato` : ''}.</p>
         ${res.avisos.length ? `<ul class="err-list warn-list" style="margin-top:10px">${res.avisos.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
         ${res.errores.length ? `<ul class="err-list" style="margin-top:10px">${res.errores.slice(0, 200).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
     }

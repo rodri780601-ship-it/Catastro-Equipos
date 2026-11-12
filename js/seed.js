@@ -128,7 +128,13 @@ const Seed = {
         const viejo = !c && fechaAlta < '2020-06-01';
         const vencido = c && c.fechaTermino < today;
         const roll = rnd();
-        if ((viejo && roll < 0.45) || (!c && roll < 0.05) || (vencido && roll < 0.35)) {
+        if (vencido && roll < 0.35) {
+          // Arriendo de un contrato vencido: devuelto al proveedor
+          const f = dateBetween(c.fechaTermino, today);
+          eq.estado = 'Término de contrato'; eq.nombre = 'TÉRMINO DE CONTRATO';
+          eq.termino = { fecha: f, motivo: 'Vencimiento del contrato', detalle: 'Retirado por el proveedor según acta de devolución.' };
+          mv(eq, stamp(f), 'Término de contrato', `${eq.termino.motivo}. ${eq.termino.detalle}`);
+        } else if ((viejo && roll < 0.45) || (!c && roll < 0.05)) {
           eq.estado = 'Baja'; eq.nombre = 'BAJA';
           eq.fechaBaja = vencido ? dateBetween(c.fechaTermino, today) : dateBetween(addDays(fechaAlta, 900), addDays(today, -5));
           if (eq.fechaBaja > today) eq.fechaBaja = addDays(today, -3);
@@ -154,32 +160,40 @@ const Seed = {
       }
     });
 
-    /* ---- Solicitudes de baja de los usuarios regionales: pendientes y algunas ya respondidas ---- */
+    /* ---- Solicitudes de baja y de término de contrato de los usuarios regionales: pendientes y respondidas ---- */
     const solicitudes = [];
-    // Equipos propios vigentes de la región, los más antiguos primero
-    const candidatos = r => equipos.filter(e => e.estado !== 'Baja' && !e.reparacion && e.propiedad === 'CONAF' && e.region === r)
+    const TERMINO = 'Término de contrato';
+    const vigenteSeed = e => e.estado !== 'Baja' && e.estado !== TERMINO && !e.reparacion && !e.solicitudBaja;
+    // Equipos vigentes de la región (propios para las bajas, en arriendo para los términos), los más antiguos primero
+    const candidatos = (r, prop) => equipos.filter(e => vigenteSeed(e) && e.propiedad === prop && e.region === r)
       .sort((a, b) => a.fechaAlta < b.fechaAlta ? -1 : 1);
-    const rm = candidatos('RM'), vii = candidatos('VII');
-    const solicitar = (e, u, motivo, detalle, f) => {
-      const s = { id: 's' + (solicitudes.length + 1), tipo: 'Baja', equipoId: e.id, inventario: e.inventario, region: e.region, motivo, detalle, fecha: stamp(f), usuario: u.name, usuarioId: u.id, estado: 'Pendiente', resolucion: null, visto: true };
+    const rm = candidatos('RM', 'CONAF'), vii = candidatos('VII', 'CONAF');
+    const solicitar = (e, u, motivo, detalle, f, tipo = 'Baja') => {
+      const s = { id: 's' + (solicitudes.length + 1), tipo, equipoId: e.id, inventario: e.inventario, region: e.region, motivo, detalle, fecha: stamp(f), usuario: u.name, usuarioId: u.id, estado: 'Pendiente', resolucion: null, visto: true };
       solicitudes.push(s);
-      e.solicitudBaja = { id: s.id, motivo, detalle, fecha: s.fecha, usuario: u.name, usuarioId: u.id };
-      mv(e, s.fecha, 'Solicitud de baja', `${motivo}. ${detalle}`, u.name);
+      e.solicitudBaja = { id: s.id, tipo, motivo, detalle, fecha: s.fecha, usuario: u.name, usuarioId: u.id };
+      mv(e, s.fecha, tipo === TERMINO ? 'Solicitud de término de contrato' : 'Solicitud de baja', `${motivo}. ${detalle}`, u.name);
       e.actualizado = s.fecha;
       return s;
     };
     // La respuesta queda sin leer (visto: false) para que el solicitante reciba el aviso
     const responder = (s, e, estado, comentario, f) => {
-      const admin = users[0];
+      const admin = users[0], termino = s.tipo === TERMINO;
       s.estado = estado; s.visto = false;
       s.resolucion = { fecha: stamp(f), usuario: admin.name, usuarioId: admin.id, comentario };
       e.solicitudBaja = null;
       if (estado === 'Rechazada') mv(e, s.resolucion.fecha, 'Solicitud rechazada', comentario, admin.name);
       else {
         const p = personas.find(x => x.id === e.personaId);
-        if (p) mv(e, s.resolucion.fecha, 'Devolución', `Devuelto por ${p.nombre} por baja del equipo.`, admin.name);
-        Object.assign(e, { estado: 'Baja', nombre: 'BAJA', rut: '', personaId: '', fechaAsignacion: '', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
-        mv(e, s.resolucion.fecha, 'Baja', `${s.motivo}. ${comentario} (solicitada por ${s.usuario})`, admin.name);
+        if (p) mv(e, s.resolucion.fecha, 'Devolución', `Devuelto por ${p.nombre} por ${termino ? 'término de contrato' : 'baja del equipo'}.`, admin.name);
+        Object.assign(e, { rut: '', personaId: '', fechaAsignacion: '' });
+        if (termino) {
+          Object.assign(e, { estado: TERMINO, nombre: 'TÉRMINO DE CONTRATO', termino: { fecha: f, motivo: s.motivo, detalle: comentario } });
+          mv(e, s.resolucion.fecha, TERMINO, `${s.motivo}. ${comentario} (solicitado por ${s.usuario})`, admin.name);
+        } else {
+          Object.assign(e, { estado: 'Baja', nombre: 'BAJA', fechaBaja: f, motivoBaja: s.motivo, detalleBaja: comentario });
+          mv(e, s.resolucion.fecha, 'Baja', `${s.motivo}. ${comentario} (solicitada por ${s.usuario})`, admin.name);
+        }
       }
       e.actualizado = s.resolucion.fecha;
     };
@@ -188,6 +202,13 @@ const Seed = {
     if (vii[0]) solicitar(vii[0], users[1], 'Obsolescencia técnica', 'Equipo no soporta sistema operativo vigente.', addDays(today, -2));
     if (vii[1]) responder(solicitar(vii[1], users[1], 'Obsolescencia técnica', 'Equipo lento; no soporta las aplicaciones actuales.', addDays(today, -12)), vii[1], 'Rechazada', 'El equipo aún cumple los requisitos mínimos. Se recomienda ampliar la memoria y reasignarlo.', addDays(today, -10));
     if (vii[2]) responder(solicitar(vii[2], users[1], 'Daño irreparable', 'Placa madre dañada según informe técnico IT-DEMO-044.', addDays(today, -9)), vii[2], 'Aprobada', `Res. Exenta N° DEMO-512/${today.slice(0, 4)}.`, addDays(today, -6));
+
+    // Términos de contrato solicitados por los usuarios regionales (equipos en arriendo)
+    const rmA = candidatos('RM', 'ARRIENDO'), viiA = candidatos('VII', 'ARRIENDO');
+    if (rmA[0]) solicitar(rmA[0], users[2], 'Vencimiento del contrato', 'El proveedor coordinó el retiro del equipo para el viernes.', addDays(today, -2), TERMINO);
+    if (viiA[0]) solicitar(viiA[0], users[1], 'Reemplazo por el proveedor', 'El proveedor reemplaza el equipo por uno nuevo según el contrato.', addDays(today, -1), TERMINO);
+    if (viiA[1]) responder(solicitar(viiA[1], users[1], 'Vencimiento del contrato', 'Equipo retirado por el proveedor.', addDays(today, -8), TERMINO), viiA[1], 'Aprobada', 'Acta de devolución DEMO-AD-031.', addDays(today, -7));
+    if (viiA[2]) responder(solicitar(viiA[2], users[1], 'Término anticipado del contrato', 'La oficina ya no requiere el equipo.', addDays(today, -15), TERMINO), viiA[2], 'Rechazada', 'El contrato sigue vigente; reasigne el equipo a otro funcionario de la región.', addDays(today, -13));
 
     movimientos.sort((a, b) => a.fecha < b.fecha ? -1 : 1);
     movimientos.forEach((m, i) => { m.id = 'm' + (i + 1); });

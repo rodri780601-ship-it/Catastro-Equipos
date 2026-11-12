@@ -176,7 +176,7 @@ input:disabled,select:disabled{background:var(--surface-2);color:var(--muted)}
 .page-actions{display:flex;gap:8px;flex-wrap:wrap}
 
 /* ---------- KPIs ---------- */
-.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.kpis{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:14px;margin-bottom:18px}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);text-decoration:none;color:inherit;display:block;transition:border-color .15s}
 a.kpi:hover{border-color:var(--primary-100)}
 .kpi .k-label{font-size:13px;color:var(--text-2);font-weight:600;display:flex;align-items:center;gap:7px}
@@ -359,7 +359,7 @@ td.actions{text-align:right;white-space:nowrap}
 
 /* ---------- Responsive ---------- */
 @media (max-width:1280px){
-  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media (max-width:1000px){
   .g-dash,.g-2,.g-3{grid-template-columns:minmax(0,1fr)}
